@@ -30,8 +30,7 @@ Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 ## Installation
 
 1. Download or clone this repository
-2. Copy the `addons/godot_gpu_cloth/` folder into your project's `addons/` directory
-3. In Godot: **Project > Project Settings > Plugins** > Enable **"GPU Cloth Sim"**
+2. Use the Godot AssetLib to import gpu_cloth_sim.zip into your project
 
 Or clone the entire repo to try the included demo scene immediately.
 
