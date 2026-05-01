@@ -1,8 +1,9 @@
-[gd_scene load_steps=16 format=3 uid="uid://gyddjctcs3jv"]
+[gd_scene load_steps=17 format=3 uid="uid://gyddjctcs3jv"]
 
 [ext_resource type="Script" uid="uid://ctlpgmmvkdgbk" path="res://addons/godot_gpu_cloth/src/gpu_cloth_solver.gd" id="1_solver"]
 [ext_resource type="Script" uid="uid://crhslrexuk7cm" path="res://addons/godot_gpu_cloth/src/gpu_cloth_collider.gd" id="2_collider"]
 [ext_resource type="Shader" uid="uid://dyty3yc4opbc7" path="res://addons/godot_gpu_cloth/shaders/cloth_surface.gdshader" id="4_cloth_shader"]
+[ext_resource type="Script" path="res://demo/cloth_demo_camera.gd" id="5_camera"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(10, 10)
@@ -45,16 +46,18 @@ noise = SubResource("FastNoiseLite_u328a")
 render_priority = 0
 shader = ExtResource("4_cloth_shader")
 shader_parameter/fabric_type = 1
-shader_parameter/fabric_scale = 30.0
-shader_parameter/primary_color = Color(0.4, 0.1, 0.2, 1)
-shader_parameter/secondary_color = Color(0.92, 0.4, 0.64, 1)
+shader_parameter/fabric_scale = 6.0
+shader_parameter/fabric_normal_intensity = 0.2
+shader_parameter/primary_color = Color(0.12, 0.06, 0.18, 1)
+shader_parameter/secondary_color = Color(0.62, 0.5, 0.85, 1)
 shader_parameter/base_roughness = 0.55
-shader_parameter/border_width = 0.03
-shader_parameter/border_color = Color(0.95, 0.85, 0.5, 1)
-shader_parameter/border_edge_mask = 12
-shader_parameter/dirt_amount = 0.15
-shader_parameter/shape_mask = SubResource("NoiseTexture2D_xn27r")
-shader_parameter/shape_mask_threshold = 0.42
+shader_parameter/specular = 0.4
+shader_parameter/border_width = 0.04
+shader_parameter/border_color = Color(0.85, 0.72, 0.35, 1)
+shader_parameter/border_glow = 0.15
+shader_parameter/border_edge_mask = 7
+shader_parameter/dirt_amount = 0.08
+shader_parameter/wear_amount = 0.08
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_xy6p7"]
 
@@ -64,16 +67,31 @@ sky_material = SubResource("ProceduralSkyMaterial_xy6p7")
 [sub_resource type="Environment" id="Environment_xn27r"]
 background_mode = 2
 sky = SubResource("Sky_u328a")
+ambient_light_source = 3
+ambient_light_energy = 0.6
+tonemap_mode = 3
+ssao_enabled = true
+ssao_radius = 0.5
+ssao_intensity = 1.5
+ssao_power = 1.5
+ssao_horizon = 0.05
+glow_enabled = true
+glow_intensity = 1.0
+glow_strength = 1.1
+glow_bloom = 0.1
+glow_hdr_threshold = 1.4
 
 [node name="ClothDemo" type="Node3D"]
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 3, 3)
 shadow_enabled = true
+shadow_blur = 1.5
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.92896473, 0.37016815, 0, -0.37016815, 0.92896473, 0, 0.10118133, 1.2946205)
 current = true
+script = ExtResource("5_camera")
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -2.5, 0)

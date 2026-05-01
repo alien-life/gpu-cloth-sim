@@ -10,6 +10,11 @@ GPU-accelerated cloth simulation for Godot 4.5+ using Position-Based Dynamics on
 ## Support
 Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 
+## What's New in 1.2.0
+
+- **Per-particle voxel ambient occlusion** — a 5th compute pass voxelizes the cloth's particles into a small bit-packed grid (default 32×32×16) each frame, then samples a neighborhood per particle to compute occlusion. The result is read back alongside positions, written to vertex `COLOR.r` (visibility), and consumed by the surface shader as Godot's `AO` builtin output. Folds darken naturally with no screen-space noise, view-independent, ~0.2 ms on a mid-range GPU.
+- **Double-sided lighting fix** — back-face normal-map handling now flips the tangent-space z component so cloth back faces light correctly. Previously the procedural fabric normal pointed the wrong way on the side facing away from the camera/light, producing flat or wrong shading.
+
 ## What's New in 1.1.0
 
 - **Procedural fabric surface shader** — silk, linen, and animated lava fabric types with primary/secondary tint, border trim (per-edge bitmask), emblem layer, dirt, and edge wear. Replaces the previous minimal default shader.
@@ -32,8 +37,9 @@ Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 - **Pin targets** — pin particles to `Marker3D` nodes or auto-pin the top row, with per-pin smoothing to prevent snap on fast motion
 - **Procedural fabric shader** — silk / linen / animated lava with border trim (per-edge bitmask), emblem layer, dirt, and wear, all parameterized
 - **Shape-mask cutout** — bind a `sampler2D` to mask out non-rectangular cloth shapes via fragment `discard`
+- **Per-particle voxel ambient occlusion** — cloth folds darken naturally via a per-frame voxelization compute pass, no screen-space noise
 - **Editor preview** — wireframe grid, pin connections, and collider shapes drawn in the editor viewport (`@tool`)
-- **Double-sided rendering** with automatic back-face normal flip
+- **Double-sided rendering** with proper back-face normal-map handling
 - **Async GPU readback** — compute submission and mesh sync are pipelined across frames to hide GPU latency
 
 ## Requirements
@@ -87,6 +93,11 @@ zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
 | `wind` | `Vector3` | `(0,0,0)` | Global wind direction and strength |
 | `wind_turbulence` | `float` | `0.3` | Wind gust intensity |
 | `wind_frequency` | `float` | `1.0` | Wind gust speed |
+| `voxel_ao_enabled` | `bool` | `true` | Run per-particle voxel AO pass and feed results into vertex colors |
+| `voxel_ao_cell_size` | `float` | `0.06` | Voxel grid cell size in solver-local units |
+| `voxel_ao_grid_dim` | `Vector3i` | `(32,32,16)` | Voxel grid resolution (cells in X, Y, Z) |
+| `voxel_ao_radius` | `int` | `2` | Sample neighborhood radius in cells. Higher = softer/larger AO at cost of more samples. |
+| `voxel_ao_strength` | `float` | `1.0` | Multiplier on raw occlusion fraction before clamping to [0,1] |
 
 ## GPUClothCollider Properties
 
@@ -115,6 +126,8 @@ Constraint groups are graph-colored so no two constraints in a group share a par
 Particle positions are stored as `vec4(x, y, z, inverse_mass)` where `inverse_mass = 0` means pinned and `inverse_mass = 1` means free. This encoding lets the constraint solver naturally handle pin/free weighting in a single code path.
 
 The mesh readback is **asynchronous**: each frame the solver submits the compute list and sets a "pending readback" flag. On the next frame's `_physics_process`, before kicking off new work, it calls `_rd.sync()` and reads the previous frame's results back into the `ArrayMesh`. This pipelines GPU simulation against the next frame's CPU work (game logic, physics, rendering setup) instead of forcing a CPU stall on the same frame the work was submitted. The visible cloth is one frame behind the simulation, which is imperceptible at typical framerates.
+
+If `voxel_ao_enabled`, after the cloth substep loop the solver runs two more compute passes per frame: a voxelize pass that bit-packs particle occupancy into a small grid via `atomicOr`, and a sample pass that for each particle scans a neighborhood of cells and counts occupied cells as occlusion. Per-particle AO is read back alongside positions and written to vertex `COLOR.r` (visibility = 1 − occlusion). The default surface shader consumes this as Godot's `AO` builtin output, which the engine multiplies into the ambient lighting term.
 
 ## Demo
 

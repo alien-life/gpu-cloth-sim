@@ -65,6 +65,13 @@ uniform float shape_mask_threshold : hint_range(0.0, 1.0) = 0.5;
 uniform vec2 shape_mask_uv_scale = vec2(1.0, 1.0);
 uniform vec2 shape_mask_uv_offset = vec2(0.0, 0.0);
 
+// -- Occlusion (driven by per-vertex COLOR.r from voxel AO pass) --
+group_uniforms occlusion;
+uniform float ao_strength : hint_range(0.0, 2.0) = 1.0;
+uniform float ao_roughness_boost : hint_range(0.0, 0.5) = 0.15;
+
+varying vec4 cloth_ao_color;
+
 
 // ==========================================================
 // Noise
@@ -289,6 +296,15 @@ float wear_mask(vec2 uv) {
 
 
 // ==========================================================
+// Vertex
+// ==========================================================
+
+void vertex() {
+	cloth_ao_color = COLOR;
+}
+
+
+// ==========================================================
 // Fragment
 // ==========================================================
 
@@ -303,10 +319,16 @@ void fragment() {
 		if (mask_val < shape_mask_threshold) discard;
 	}
 
-	// Back-face normal flip
+	// -- Procedural normals (computed first so back-face flip can adjust them) --
+	vec3 fnorm = fabric_normal(uv);
+
+	// Back-face normal flip — also flip tangent-space z so NORMAL_MAP processes
+	// the back face's tangent space correctly (otherwise the procedural normal
+	// points the wrong way and back-face lighting reads as flat / wrong).
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
 		DEPTH = FRAGCOORD.z + 0.0001;
+		fnorm.z = 1.0 - fnorm.z;
 	}
 
 	// -- Fabric base --
@@ -321,9 +343,6 @@ void fragment() {
 	} else {
 		fabric_albedo = fabric_linen(uv, rough_mod);
 	}
-
-	// -- Procedural normals --
-	vec3 fnorm = fabric_normal(uv);
 
 	// -- Border trim --
 	float bdist = border_sdf(uv);
@@ -366,6 +385,12 @@ void fragment() {
 	fabric_albedo = mix(fabric_albedo, fabric_albedo * 1.5 + vec3(0.05), wear);
 	rough_mod += wear * 0.2;
 
+	// -- Voxel AO (per-vertex cloth_ao_color.r encodes visibility 0..1) --
+	// Half-strength on albedo (avoids double-darkening since AO output also dims ambient).
+	float vis = mix(1.0, cloth_ao_color.r, ao_strength);
+	fabric_albedo *= mix(1.0, vis, 0.5);
+	rough_mod += (1.0 - vis) * ao_roughness_boost;
+
 	// -- Output --
 	ALBEDO = fabric_albedo;
 	ROUGHNESS = clamp(base_roughness + rough_mod, 0.0, 1.0);
@@ -373,6 +398,8 @@ void fragment() {
 	SPECULAR = specular;
 	NORMAL_MAP = fnorm;
 	NORMAL_MAP_DEPTH = fabric_normal_intensity;
+	AO = vis;
+	AO_LIGHT_AFFECT = 0.4;
 
 	if (length(emission) > 0.001) {
 		EMISSION = emission;

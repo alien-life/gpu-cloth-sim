@@ -35,6 +35,14 @@ extends Node3D
 @export var wind_turbulence: float = 0.3
 @export var wind_frequency: float = 1.0
 
+@export_group("Voxel Occlusion")
+@export var voxel_ao_enabled: bool = true
+@export var voxel_ao_cell_size: float = 0.06
+@export var voxel_ao_grid_dim: Vector3i = Vector3i(32, 32, 16)
+@export var voxel_ao_radius: int = 2
+@export var voxel_ao_strength: float = 1.0
+@export var voxel_ao_aabb_padding: float = 0.2
+
 # GPU resources
 var _rd: RenderingDevice
 
@@ -74,6 +82,19 @@ var _pin_map: Array[Dictionary] = []
 var _prev_global_pos: Vector3
 
 var _has_pending_readback: bool = false
+
+# Voxel occlusion
+var _voxel_buffer: RID
+var _ao_buffer: RID
+var _voxel_write_shader: RID
+var _voxel_sample_shader: RID
+var _voxel_write_pipeline: RID
+var _voxel_sample_pipeline: RID
+var _voxel_write_uniform_set: RID
+var _voxel_sample_uniform_set: RID
+var _voxel_zero_bytes: PackedByteArray
+var _voxel_aabb_min: Vector3
+var _ao_data: PackedByteArray  # last frame's AO scalars, used by _update_mesh
 
 # Mesh
 var _mesh_instance: MeshInstance3D
@@ -193,6 +214,41 @@ func _ready() -> void:
 		_make_uniform(4, _colliders_buffer),
 	])
 
+	# Voxel occlusion setup
+	if voxel_ao_enabled:
+		var voxel_count: int = voxel_ao_grid_dim.x * voxel_ao_grid_dim.y * voxel_ao_grid_dim.z
+		var voxel_words: int = (voxel_count + 31) / 32
+		var voxel_bytes: int = voxel_words * 4
+		_voxel_zero_bytes = PackedByteArray()
+		_voxel_zero_bytes.resize(voxel_bytes)  # all zeros by default
+		_voxel_buffer = _rd.storage_buffer_create(voxel_bytes, _voxel_zero_bytes)
+
+		var ao_init := PackedByteArray()
+		ao_init.resize(_particle_count * 4)
+		_ao_buffer = _rd.storage_buffer_create(_particle_count * 4, ao_init)
+		_ao_data = ao_init
+
+		_voxel_write_shader = _load_shader(_plugin_dir + "/shaders/compute/cloth_voxel_write.glsl")
+		_voxel_sample_shader = _load_shader(_plugin_dir + "/shaders/compute/cloth_voxel_sample.glsl")
+		_voxel_write_pipeline = _rd.compute_pipeline_create(_voxel_write_shader)
+		_voxel_sample_pipeline = _rd.compute_pipeline_create(_voxel_sample_shader)
+		_voxel_write_uniform_set = _create_uniform_set(_voxel_write_shader, [
+			_make_uniform(0, _positions_buffer),
+			_make_uniform(1, _voxel_buffer),
+		])
+		_voxel_sample_uniform_set = _create_uniform_set(_voxel_sample_shader, [
+			_make_uniform(0, _positions_buffer),
+			_make_uniform(1, _voxel_buffer),
+			_make_uniform(2, _ao_buffer),
+		])
+
+		# Initial AABB based on starting cloth dimensions, centered on origin
+		var half_w: float = (cloth_width - 1) * particle_spacing * 0.5
+		var height_y: float = (cloth_height - 1) * particle_spacing
+		var grid_extent: Vector3 = Vector3(voxel_ao_grid_dim) * voxel_ao_cell_size
+		var center: Vector3 = Vector3(0.0, -height_y * 0.5, 0.0)
+		_voxel_aabb_min = center - grid_extent * 0.5
+
 	# Mesh instance
 	_mesh = ArrayMesh.new()
 	_mesh_instance = MeshInstance3D.new()
@@ -221,6 +277,8 @@ func _physics_process(delta: float) -> void:
 	if _has_pending_readback:
 		_rd.sync()
 		var output_bytes: PackedByteArray = _rd.buffer_get_data(_positions_buffer)
+		if voxel_ao_enabled:
+			_ao_data = _rd.buffer_get_data(_ao_buffer)
 		_update_mesh(output_bytes)
 
 	var sub_dt: float = delta / float(substeps)
@@ -283,6 +341,10 @@ func _physics_process(delta: float) -> void:
 
 	var particle_groups: int = ceili(float(_particle_count) / 64.0)
 
+	# Clear voxel grid before compute list — buffer_update queues a transfer
+	if voxel_ao_enabled:
+		_rd.buffer_update(_voxel_buffer, 0, _voxel_zero_bytes.size(), _voxel_zero_bytes)
+
 	var cl: int = _rd.compute_list_begin()
 
 	for _s in substeps:
@@ -316,6 +378,36 @@ func _physics_process(delta: float) -> void:
 		_rd.compute_list_bind_compute_pipeline(cl, _update_pipeline)
 		_rd.compute_list_bind_uniform_set(cl, _update_uniform_set, 0)
 		_rd.compute_list_set_push_constant(cl, push_data, push_data.size())
+		_rd.compute_list_dispatch(cl, particle_groups, 1, 1)
+		_rd.compute_list_add_barrier(cl)
+
+	# Voxel occlusion — runs once after all substeps (visual, not sim-critical)
+	if voxel_ao_enabled:
+		var voxel_push := PackedByteArray()
+		voxel_push.resize(48)
+		voxel_push.encode_float(0, _voxel_aabb_min.x)
+		voxel_push.encode_float(4, _voxel_aabb_min.y)
+		voxel_push.encode_float(8, _voxel_aabb_min.z)
+		voxel_push.encode_float(12, voxel_ao_cell_size)
+		voxel_push.encode_u32(16, voxel_ao_grid_dim.x)
+		voxel_push.encode_u32(20, voxel_ao_grid_dim.y)
+		voxel_push.encode_u32(24, voxel_ao_grid_dim.z)
+		voxel_push.encode_u32(28, _particle_count)
+		voxel_push.encode_s32(32, voxel_ao_radius)
+		voxel_push.encode_float(36, voxel_ao_strength)
+		# 40-47: padding
+
+		# Voxelize particles
+		_rd.compute_list_bind_compute_pipeline(cl, _voxel_write_pipeline)
+		_rd.compute_list_bind_uniform_set(cl, _voxel_write_uniform_set, 0)
+		_rd.compute_list_set_push_constant(cl, voxel_push, voxel_push.size())
+		_rd.compute_list_dispatch(cl, particle_groups, 1, 1)
+		_rd.compute_list_add_barrier(cl)
+
+		# Sample neighborhood -> AO scalars
+		_rd.compute_list_bind_compute_pipeline(cl, _voxel_sample_pipeline)
+		_rd.compute_list_bind_uniform_set(cl, _voxel_sample_uniform_set, 0)
+		_rd.compute_list_set_push_constant(cl, voxel_push, voxel_push.size())
 		_rd.compute_list_dispatch(cl, particle_groups, 1, 1)
 		_rd.compute_list_add_barrier(cl)
 
@@ -565,6 +657,17 @@ func _update_mesh(data: PackedByteArray) -> void:
 	arrays[Mesh.ARRAY_TANGENT] = tangents
 	arrays[Mesh.ARRAY_INDEX] = _indices
 
+	# Voxel AO -> vertex colors. COLOR.r = visibility (1 = unoccluded, 0 = fully occluded).
+	# Surface shader reads via custom varying and writes Godot's AO output.
+	if voxel_ao_enabled and _ao_data.size() >= _particle_count * 4:
+		var colors := PackedColorArray()
+		colors.resize(_particle_count)
+		for i in _particle_count:
+			var ao: float = _ao_data.decode_float(i * 4)
+			var vis: float = 1.0 - ao
+			colors[i] = Color(vis, vis, vis, 1.0)
+		arrays[Mesh.ARRAY_COLOR] = colors
+
 	_mesh.clear_surfaces()
 	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
@@ -789,4 +892,11 @@ func _exit_tree() -> void:
 		_rd.free_rid(_solve_shader)
 		_rd.free_rid(_update_shader)
 		_rd.free_rid(_collide_shader)
+		if voxel_ao_enabled:
+			_rd.free_rid(_voxel_buffer)
+			_rd.free_rid(_ao_buffer)
+			_rd.free_rid(_voxel_write_pipeline)
+			_rd.free_rid(_voxel_sample_pipeline)
+			_rd.free_rid(_voxel_write_shader)
+			_rd.free_rid(_voxel_sample_shader)
 		_rd.free()
