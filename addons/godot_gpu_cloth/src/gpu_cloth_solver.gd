@@ -19,6 +19,10 @@ extends Node3D
 @export_group("Pinning")
 @export var pin_targets: Array[NodePath] = []
 @export var pin_top_row: bool = false
+@export var pin_smooth_speed: float = 20.0
+
+@export_group("Colliders")
+@export var collider_targets: Array[NodePath] = []
 
 @export_group("Appearance")
 @export var cloth_material: Material
@@ -69,6 +73,8 @@ var _pin_map: Array[Dictionary] = []
 # Inertia tracking
 var _prev_global_pos: Vector3
 
+var _has_pending_readback: bool = false
+
 # Mesh
 var _mesh_instance: MeshInstance3D
 var _mesh: ArrayMesh
@@ -98,10 +104,18 @@ func _ready() -> void:
 
 	_particle_count = cloth_width * cloth_height
 
-	# Discover collider children
-	for child in get_children():
-		if child is GPUClothCollider:
-			_colliders.append(child)
+	# Discover colliders — from explicit paths first, then child scan as fallback
+	if not collider_targets.is_empty():
+		for path in collider_targets:
+			var node: Node = get_node_or_null(path)
+			if node is GPUClothCollider:
+				_colliders.append(node)
+			else:
+				push_warning("GPUClothSolver: collider target '%s' not found or not GPUClothCollider" % path)
+	else:
+		for child in get_children():
+			if child is GPUClothCollider:
+				_colliders.append(child)
 	_collider_count = _colliders.size()
 
 	# Build CPU-side data
@@ -127,7 +141,7 @@ func _ready() -> void:
 				best_d = d
 				best_idx = i
 		pos_data[best_idx * 4 + 3] = 0.0
-		_pin_map.append({marker = marker, particle_idx = best_idx})
+		_pin_map.append({marker = marker, particle_idx = best_idx, smoothed_pos = local_pos})
 
 	# Build static mesh arrays
 	_build_mesh_topology()
@@ -201,13 +215,24 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+
+	# Sync previous frame's GPU compute (likely already finished by now — GPU worked
+	# while the CPU ran game logic, physics, and rendering setup between frames)
+	if _has_pending_readback:
+		_rd.sync()
+		var output_bytes: PackedByteArray = _rd.buffer_get_data(_positions_buffer)
+		_update_mesh(output_bytes)
+
 	var sub_dt: float = delta / float(substeps)
 
-	# Update pin positions from markers
+	# Update pin positions from markers (smoothed to prevent cloth snap)
+	var pin_lerp: float = clampf(pin_smooth_speed * delta, 0.0, 1.0)
 	for pin in _pin_map:
 		if not is_instance_valid(pin.marker):
 			continue
-		var p: Vector3 = to_local(pin.marker.global_position)
+		var target_pos: Vector3 = to_local(pin.marker.global_position)
+		pin.smoothed_pos = pin.smoothed_pos.lerp(target_pos, pin_lerp)
+		var p: Vector3 = pin.smoothed_pos
 		var pin_bytes := PackedByteArray()
 		pin_bytes.resize(16)
 		pin_bytes.encode_float(0, p.x)
@@ -296,10 +321,7 @@ func _physics_process(delta: float) -> void:
 
 	_rd.compute_list_end()
 	_rd.submit()
-	_rd.sync()
-
-	var output_bytes: PackedByteArray = _rd.buffer_get_data(_positions_buffer)
-	_update_mesh(output_bytes)
+	_has_pending_readback = true
 
 
 # ── Data builders ──────────────────────────────────────────────
@@ -663,10 +685,18 @@ func _redraw_editor_preview() -> void:
 
 	# Collider shapes
 	var col_color := Color(1.0, 0.35, 0.2, 0.8)
-	for child in get_children():
-		if not child is GPUClothCollider:
-			continue
-		var collider: GPUClothCollider = child
+	var editor_colliders: Array[Node] = []
+	if not collider_targets.is_empty():
+		for path in collider_targets:
+			var node: Node = get_node_or_null(path)
+			if node is GPUClothCollider:
+				editor_colliders.append(node)
+	else:
+		for child in get_children():
+			if child is GPUClothCollider:
+				editor_colliders.append(child)
+	for collider_node in editor_colliders:
+		var collider: GPUClothCollider = collider_node
 		var center: Vector3 = to_local(collider.global_position)
 		var r: float = collider.radius
 

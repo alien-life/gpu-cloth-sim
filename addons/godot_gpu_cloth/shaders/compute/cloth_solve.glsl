@@ -38,13 +38,19 @@ void main() {
     vec3 delta = pb - pa;
     float dist = length(delta);
 
-    if (dist < 1e-7) return;
-
     float w_sum = wa + wb;
     if (w_sum < 1e-7) return;
 
-    float err = (dist - rest) / dist;
-    vec3 correction = delta * err * stiffness;
+    // Normalize direction — fallback to gravity axis when particles collapse
+    vec3 dir;
+    if (dist < 1e-5) {
+        dir = vec3(0.0, -1.0, 0.0);
+        dist = 1e-5;
+    } else {
+        dir = delta / dist;
+    }
+
+    vec3 correction = dir * (dist - rest) * stiffness;
 
     predicted[a] = vec4(pa + correction * (wa / w_sum), wa);
     predicted[b] = vec4(pb - correction * (wb / w_sum), wb);

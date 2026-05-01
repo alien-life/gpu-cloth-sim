@@ -34,7 +34,14 @@ void main() {
     vec3 pos = positions[idx].xyz;
 
     // Reference frame correction — compensate for parent movement so free particles have inertia
-    pos -= vec3(inertia_x, inertia_y, inertia_z);
+    // Clamp inertia to prevent cloth collapse during fast movement
+    vec3 inertia = vec3(inertia_x, inertia_y, inertia_z);
+    float inertia_len = length(inertia);
+    float max_inertia = max_speed * dt * 0.5;
+    if (inertia_len > max_inertia) {
+        inertia *= max_inertia / inertia_len;
+    }
+    pos -= inertia;
 
     vec3 vel = velocities[idx].xyz;
 

@@ -10,6 +10,17 @@ GPU-accelerated cloth simulation for Godot 4.5+ using Position-Based Dynamics on
 ## Support
 Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 
+## What's New in 1.1.0
+
+- **Procedural fabric surface shader** — silk, linen, and animated lava fabric types with primary/secondary tint, border trim (per-edge bitmask), emblem layer, dirt, and edge wear. Replaces the previous minimal default shader.
+- **Shape-mask UV cutout** — bind a `sampler2D` to `shape_mask` and the fragment shader `discard`s where the red channel falls below `shape_mask_threshold`. Lets you cut non-rectangular cloth shapes (banners, ragged hems, perforations) without changing the simulation grid.
+- **Async GPU readback** — the solver now submits compute work and defers the `_rd.sync()` to the next physics frame, so the GPU pipelines simulation against the next frame's CPU work instead of stalling.
+- **Smoothed pin tracking** — pins lerp toward their marker target each frame instead of teleporting, eliminating cloth snap when markers move quickly. Tunable via `pin_smooth_speed`.
+- **Explicit collider list** — new `collider_targets: Array[NodePath]` lets the solver track colliders that aren't direct children (e.g. bones in a skeleton). Falls back to child auto-discovery when empty.
+- **Numerical stability fixes** — inertia magnitude clamped per substep to prevent cloth collapse on fast parent motion; constraint solver falls back to a gravity-axis correction direction when particles fully collapse instead of producing NaNs.
+
+> **Migration note:** the new default shader uses different uniform names (`fabric_type`, `primary_color`, `secondary_color`, etc.). The old `albedo_texture` / `color_tint` uniforms no longer exist. Existing scenes that wired those will need their `shader_parameter/*` fields updated.
+
 ## Features
 
 - **Full GPU pipeline** — predict, constraint solve, collision, and update phases all run as compute shaders on a local `RenderingDevice`
@@ -18,9 +29,12 @@ Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 - **Inertia system** — cloth naturally trails behind parent node movement
 - **Wind** with organic turbulence via sum-of-sines at irrational frequency ratios
 - **Structural, diagonal, and bending constraints** for controllable stiffness vs. drape
-- **Pin targets** — pin particles to `Marker3D` nodes or auto-pin the top row
+- **Pin targets** — pin particles to `Marker3D` nodes or auto-pin the top row, with per-pin smoothing to prevent snap on fast motion
+- **Procedural fabric shader** — silk / linen / animated lava with border trim (per-edge bitmask), emblem layer, dirt, and wear, all parameterized
+- **Shape-mask cutout** — bind a `sampler2D` to mask out non-rectangular cloth shapes via fragment `discard`
 - **Editor preview** — wireframe grid, pin connections, and collider shapes drawn in the editor viewport (`@tool`)
 - **Double-sided rendering** with automatic back-face normal flip
+- **Async GPU readback** — compute submission and mesh sync are pipelined across frames to hide GPU latency
 
 ## Requirements
 
@@ -66,7 +80,9 @@ zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
 | `max_speed` | `float` | `5.0` | Velocity clamp |
 | `pin_targets` | `Array[NodePath]` | `[]` | `Marker3D` nodes to pin nearest particles to |
 | `pin_top_row` | `bool` | `false` | Auto-pin all particles in row 0 |
-| `cloth_material` | `Material` | `null` | Override material (default: built-in double-sided shader) |
+| `pin_smooth_speed` | `float` | `20.0` | Lerp speed for pin tracking. Higher = stiffer follow. `0` freezes pins at their initial position. |
+| `collider_targets` | `Array[NodePath]` | `[]` | Explicit collider list (e.g. for colliders living elsewhere in the tree). When empty, the solver falls back to scanning direct children for `GPUClothCollider` nodes. |
+| `cloth_material` | `Material` | `null` | Override material (default: built-in procedural fabric shader) |
 | `inertia_scale` | `Vector3` | `(1,1,1)` | How strongly cloth resists parent movement |
 | `wind` | `Vector3` | `(0,0,0)` | Global wind direction and strength |
 | `wind_turbulence` | `float` | `0.3` | Wind gust intensity |
@@ -97,6 +113,8 @@ for each substep:
 Constraint groups are graph-colored so no two constraints in a group share a particle — this eliminates data races without atomics. The solver dispatches each group separately with GPU barriers between them.
 
 Particle positions are stored as `vec4(x, y, z, inverse_mass)` where `inverse_mass = 0` means pinned and `inverse_mass = 1` means free. This encoding lets the constraint solver naturally handle pin/free weighting in a single code path.
+
+The mesh readback is **asynchronous**: each frame the solver submits the compute list and sets a "pending readback" flag. On the next frame's `_physics_process`, before kicking off new work, it calls `_rd.sync()` and reads the previous frame's results back into the `ArrayMesh`. This pipelines GPU simulation against the next frame's CPU work (game logic, physics, rendering setup) instead of forcing a CPU stall on the same frame the work was submitted. The visible cloth is one frame behind the simulation, which is imperceptible at typical framerates.
 
 ## Demo
 

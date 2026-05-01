@@ -20,11 +20,16 @@ noise = SubResource("FastNoiseLite_xy6p7")
 [sub_resource type="ShaderMaterial" id="Mat_cape"]
 render_priority = 0
 shader = ExtResource("4_cloth_shader")
-shader_parameter/albedo_texture = SubResource("NoiseTexture2D_u328a")
-shader_parameter/color_tint = Color(0.71915966, 0.4615481, 0.9747351, 1)
-shader_parameter/roughness = 0.9
-shader_parameter/metallic = 0.0
-shader_parameter/specular = 0.0
+shader_parameter/fabric_type = 0
+shader_parameter/primary_color = Color(0.05, 0.02, 0.08, 1)
+shader_parameter/secondary_color = Color(0.9, 0.3, 0.1, 1)
+shader_parameter/base_roughness = 0.75
+shader_parameter/border_width = 0.05
+shader_parameter/border_color = Color(0.7, 0.5, 0.1, 1)
+shader_parameter/border_glow = 0.5
+shader_parameter/border_edge_mask = 4
+shader_parameter/lava_emission = 2.5
+shader_parameter/dirt_amount = 0.2
 
 [sub_resource type="SphereMesh" id="SphereMesh_xy6p7"]
 radius = 0.45
@@ -39,11 +44,17 @@ noise = SubResource("FastNoiseLite_u328a")
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_2idfw"]
 render_priority = 0
 shader = ExtResource("4_cloth_shader")
-shader_parameter/albedo_texture = SubResource("NoiseTexture2D_xn27r")
-shader_parameter/color_tint = Color(0.91963464, 0.39785102, 0.6355413, 1)
-shader_parameter/roughness = 0.9
-shader_parameter/metallic = 0.0
-shader_parameter/specular = 0.0
+shader_parameter/fabric_type = 1
+shader_parameter/fabric_scale = 30.0
+shader_parameter/primary_color = Color(0.4, 0.1, 0.2, 1)
+shader_parameter/secondary_color = Color(0.92, 0.4, 0.64, 1)
+shader_parameter/base_roughness = 0.55
+shader_parameter/border_width = 0.03
+shader_parameter/border_color = Color(0.95, 0.85, 0.5, 1)
+shader_parameter/border_edge_mask = 12
+shader_parameter/dirt_amount = 0.15
+shader_parameter/shape_mask = SubResource("NoiseTexture2D_xn27r")
+shader_parameter/shape_mask_threshold = 0.42
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_xy6p7"]
 
