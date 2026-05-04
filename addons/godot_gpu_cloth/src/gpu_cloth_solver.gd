@@ -22,14 +22,24 @@ extends Node3D
 @export var pin_smooth_speed: float = 20.0
 
 @export_group("Fishing Line")
-## Hard-clamp each free particle to within stretch_factor × rest distance
-## of its nearest pin's CURRENT position. Eliminates the "rubber band" droop
-## that comes from slow tension propagation through the spring network.
+## Hard-clamp each free particle to within stretch x rest distance of the
+## weighted blend of its K nearest pins' CURRENT positions. Eliminates the
+## "rubber band" droop that comes from slow tension propagation through the
+## spring network. Also zeros outward radial velocity at the boundary so
+## particles slide along it instead of buzzing.
 @export var enable_fishing_line: bool = true
-## How much the fishing-line distance is allowed to exceed the rest distance.
-## 1.0 = perfectly inelastic, 1.02 = 2 % stretch (default — feels stiff but alive),
-## 1.10+ = visibly slack.
+## How much the fishing-line distance is allowed to exceed the rest distance,
+## used when stretch_curve is null. 1.0 = perfectly inelastic, 1.02 = 2 % stretch
+## (default -- feels stiff but alive), 1.10+ = visibly slack.
 @export var fishing_stretch: float = 1.02
+## Optional per-row stretch curve sampled by row_index / (cloth_height - 1).
+## When assigned (and non-empty), overrides fishing_stretch on a per-particle basis,
+## letting you author "stiff at the pins, looser at the hem" in one Curve resource.
+@export var stretch_curve: Curve
+## Number of nearest pins each free particle is bound to. K=1 reproduces v1.3
+## single-anchor behaviour. K=2-4 smooths the Voronoi seams between multiple pins.
+## Higher K = smoother blends but bigger binding buffer.
+@export_range(1, 8) var bindings_per_particle: int = 4
 
 @export_group("Colliders")
 @export var collider_targets: Array[NodePath] = []
@@ -93,8 +103,8 @@ var _prev_global_pos: Vector3
 
 var _has_pending_readback: bool = false
 
-# Fishing-line anchors
-var _anchors_buffer: RID
+# Fishing-line bindings (K per particle)
+var _bindings_buffer: RID
 var _fishing_shader: RID
 var _fishing_pipeline: RID
 var _fishing_uniform_set: RID
@@ -231,17 +241,18 @@ func _ready() -> void:
 		_make_uniform(4, _colliders_buffer),
 	])
 
-	# Fishing-line anchor setup — only allocate if any pin exists
+	# Fishing-line binding setup -- only allocate if any pin exists
 	if enable_fishing_line:
-		var anchor_data: PackedFloat32Array = _build_anchors(pos_data)
+		var binding_data: PackedFloat32Array = _build_bindings(pos_data, bindings_per_particle)
 		if _has_anchors:
-			var anchor_bytes: PackedByteArray = anchor_data.to_byte_array()
-			_anchors_buffer = _rd.storage_buffer_create(anchor_bytes.size(), anchor_bytes)
+			var binding_bytes: PackedByteArray = binding_data.to_byte_array()
+			_bindings_buffer = _rd.storage_buffer_create(binding_bytes.size(), binding_bytes)
 			_fishing_shader = _load_shader(_plugin_dir + "/shaders/compute/cloth_fishing.glsl")
 			_fishing_pipeline = _rd.compute_pipeline_create(_fishing_shader)
 			_fishing_uniform_set = _create_uniform_set(_fishing_shader, [
 				_make_uniform(0, _predicted_buffer),
-				_make_uniform(1, _anchors_buffer),
+				_make_uniform(1, _bindings_buffer),
+				_make_uniform(2, _velocities_buffer),
 			])
 
 	# Voxel occlusion setup
@@ -283,6 +294,12 @@ func _ready() -> void:
 	_mesh = ArrayMesh.new()
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.mesh = _mesh
+	# Cloth is double-sided (cull_disabled in shader) so the shadow pass needs to
+	# project shadows from both faces, otherwise back-facing parts of folds drop
+	# their shadows and the engine looks like it's "losing" the cloth.
+	_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
+	# Cloth deforms every frame, so opt out of static GI assumptions.
+	_mesh_instance.gi_mode = GeometryInstance3D.GI_MODE_DYNAMIC
 	if cloth_material:
 		_mesh_instance.material_override = cloth_material
 	else:
@@ -350,10 +367,14 @@ func _physics_process(delta: float) -> void:
 	var effective_wind: Vector3 = wind + wind.length() * gust * wind_turbulence
 	var local_wind: Vector3 = global_transform.basis.inverse() * effective_wind
 
+	# World-down gravity, transformed into solver-local space so rotating the
+	# solver node does NOT tilt gravity with it. (Wind already does the same.)
+	var local_gravity: Vector3 = global_transform.basis.inverse() * Vector3(0.0, gravity_strength, 0.0)
+
 	var push_data := PackedByteArray()
-	push_data.resize(64)
+	push_data.resize(80)
 	push_data.encode_float(0, sub_dt)
-	push_data.encode_float(4, gravity_strength)
+	# offset 4: legacy scalar gravity slot, no longer read by any shader
 	push_data.encode_u32(8, _particle_count)
 	push_data.encode_u32(12, _constraint_count)
 	push_data.encode_float(16, damping)
@@ -368,6 +389,10 @@ func _physics_process(delta: float) -> void:
 	push_data.encode_float(52, local_wind.y)
 	push_data.encode_float(56, local_wind.z)
 	# 60-63: padding
+	push_data.encode_float(64, local_gravity.x)
+	push_data.encode_float(68, local_gravity.y)
+	push_data.encode_float(72, local_gravity.z)
+	# 76-79: padding
 
 	var particle_groups: int = ceili(float(_particle_count) / 64.0)
 
@@ -396,12 +421,13 @@ func _physics_process(delta: float) -> void:
 				_rd.compute_list_dispatch(cl, ceili(float(group.count) / 64.0), 1, 1)
 				_rd.compute_list_add_barrier(cl)
 
-		# Fishing-line clamp (Sucker Punch trick) — propagates pin tension in O(1)
+		# Fishing-line clamp -- K-nearest weighted blend, velocity-aware projection.
+		# Stretch is baked into bindings.y at init, so push only carries dispatch params.
 		if _has_anchors:
 			var fishing_push := PackedByteArray()
 			fishing_push.resize(16)
 			fishing_push.encode_u32(0, _particle_count)
-			fishing_push.encode_float(4, fishing_stretch)
+			fishing_push.encode_u32(4, bindings_per_particle)
 			# 8-15: padding
 			_rd.compute_list_bind_compute_pipeline(cl, _fishing_pipeline)
 			_rd.compute_list_bind_uniform_set(cl, _fishing_uniform_set, 0)
@@ -608,13 +634,20 @@ func _push_constraint(data: PackedFloat32Array, a: int, b: int, rest: float, k: 
 	data.append(k)
 
 
-func _build_anchors(pos_data: PackedFloat32Array) -> PackedFloat32Array:
-	# vec2 per particle: (uintBitsToFloat(anchor_idx), rest_distance).
-	# Pinned particles point to themselves so the shader early-outs.
-	# If no pins exist, _has_anchors stays false and we never dispatch.
+func _build_bindings(pos_data: PackedFloat32Array, k: int) -> PackedFloat32Array:
+	# K bindings per particle. Each binding is a vec4:
+	#   .x = uintBitsToFloat(anchor_particle_idx)  (== self-idx for unused slots)
+	#   .y = max_dist_for_this_binding             (== rest_distance * stretch_at_row)
+	#   .z = weight                                (sums to 1.0 across used slots)
+	#   .w = pad
+	#
+	# Weights are inverse-square distance, normalized. Stretch comes from
+	# `stretch_curve` (sampled by row_index / (cloth_height - 1)) when assigned
+	# and non-empty, otherwise from the scalar `fishing_stretch` export.
 	var data := PackedFloat32Array()
-	data.resize(_particle_count * 2)
+	data.resize(_particle_count * k * 4)
 
+	# Collect pinned particles
 	var pinned_indices: PackedInt32Array = PackedInt32Array()
 	var pinned_positions: PackedVector3Array = PackedVector3Array()
 	for i in _particle_count:
@@ -627,23 +660,38 @@ func _build_anchors(pos_data: PackedFloat32Array) -> PackedFloat32Array:
 			))
 
 	_has_anchors = not pinned_indices.is_empty()
-	if not _has_anchors:
-		# Self-pointing fallback so the buffer is still well-formed if ever uploaded
-		var bytes := PackedByteArray()
-		bytes.resize(4)
-		for i in _particle_count:
-			bytes.encode_u32(0, i)
-			data[i * 2] = bytes.decode_float(0)
-			data[i * 2 + 1] = 0.0
-		return data
 
 	var idx_bytes := PackedByteArray()
 	idx_bytes.resize(4)
-	for i in _particle_count:
-		if pos_data[i * 4 + 3] == 0.0:
+
+	# No pins -> fill with self-sentinels so the buffer is well-formed
+	if not _has_anchors:
+		for i in _particle_count:
 			idx_bytes.encode_u32(0, i)
-			data[i * 2] = idx_bytes.decode_float(0)
-			data[i * 2 + 1] = 0.0
+			var self_float: float = idx_bytes.decode_float(0)
+			for slot in k:
+				var off: int = (i * k + slot) * 4
+				data[off] = self_float
+				data[off + 1] = 0.0
+				data[off + 2] = 0.0
+				data[off + 3] = 0.0
+		return data
+
+	var use_curve: bool = stretch_curve != null and stretch_curve.point_count > 0
+	var height_div: float = float(maxi(cloth_height - 1, 1))
+
+	for i in _particle_count:
+		idx_bytes.encode_u32(0, i)
+		var self_float: float = idx_bytes.decode_float(0)
+
+		# Pinned particles get K self-sentinels (shader early-outs on inverse_mass==0 anyway)
+		if pos_data[i * 4 + 3] == 0.0:
+			for slot in k:
+				var off: int = (i * k + slot) * 4
+				data[off] = self_float
+				data[off + 1] = 0.0
+				data[off + 2] = 0.0
+				data[off + 3] = 0.0
 			continue
 
 		var p: Vector3 = Vector3(
@@ -651,17 +699,54 @@ func _build_anchors(pos_data: PackedFloat32Array) -> PackedFloat32Array:
 			pos_data[i * 4 + 1],
 			pos_data[i * 4 + 2]
 		)
-		var best_idx: int = pinned_indices[0]
-		var best_d2: float = INF
-		for j in pinned_indices.size():
-			var d2: float = p.distance_squared_to(pinned_positions[j])
-			if d2 < best_d2:
-				best_d2 = d2
-				best_idx = pinned_indices[j]
 
-		idx_bytes.encode_u32(0, best_idx)
-		data[i * 2] = idx_bytes.decode_float(0)
-		data[i * 2 + 1] = sqrt(best_d2)
+		# Per-particle stretch: curve-driven if available, else global scalar
+		var row: int = i / cloth_width
+		var row_t: float = float(row) / height_div
+		var stretch: float
+		if use_curve:
+			stretch = stretch_curve.sample(row_t)
+		else:
+			stretch = fishing_stretch
+		stretch = maxf(stretch, 0.0)
+
+		# Sort all pins by distance to this particle
+		var sort_pairs: Array = []
+		for j in pinned_indices.size():
+			var d: float = p.distance_to(pinned_positions[j])
+			sort_pairs.append([d, pinned_indices[j]])
+		sort_pairs.sort_custom(func(a, b): return a[0] < b[0])
+
+		var k_actual: int = mini(k, sort_pairs.size())
+
+		# Inverse-square raw weights, then normalize so they sum to 1
+		var raw_weights: Array = []
+		var weight_sum: float = 0.0
+		for slot in k_actual:
+			var d: float = sort_pairs[slot][0]
+			var w: float = 1.0 / maxf(d * d, 1e-8)
+			raw_weights.append(w)
+			weight_sum += w
+
+		# Write K slots (used + unused)
+		for slot in k:
+			var off: int = (i * k + slot) * 4
+			if slot < k_actual:
+				var anchor_idx: int = sort_pairs[slot][1]
+				var rest_dist: float = sort_pairs[slot][0]
+				var max_dist: float = rest_dist * stretch
+				var norm_weight: float = raw_weights[slot] / weight_sum
+				idx_bytes.encode_u32(0, anchor_idx)
+				data[off] = idx_bytes.decode_float(0)
+				data[off + 1] = max_dist
+				data[off + 2] = norm_weight
+				data[off + 3] = 0.0
+			else:
+				# Unused slot -- self-sentinel, zero weight
+				data[off] = self_float
+				data[off + 1] = 0.0
+				data[off + 2] = 0.0
+				data[off + 3] = 0.0
 
 	return data
 
@@ -994,7 +1079,7 @@ func _exit_tree() -> void:
 		_rd.free_rid(_update_shader)
 		_rd.free_rid(_collide_shader)
 		if _has_anchors:
-			_rd.free_rid(_anchors_buffer)
+			_rd.free_rid(_bindings_buffer)
 			_rd.free_rid(_fishing_pipeline)
 			_rd.free_rid(_fishing_shader)
 		if voxel_ao_enabled:

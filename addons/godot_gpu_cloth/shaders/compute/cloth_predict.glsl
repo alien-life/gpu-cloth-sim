@@ -9,7 +9,7 @@ layout(set = 0, binding = 2, std430) restrict buffer Velocities  { vec4 velociti
 
 layout(push_constant, std430) uniform Params {
     float dt;
-    float gravity;
+    float pad_gravity_legacy;  // was scalar gravity before world-space gravity vec3 was added
     uint  particle_count;
     uint  constraint_count;
     float damping;
@@ -19,6 +19,8 @@ layout(push_constant, std430) uniform Params {
     float pad3;
     float wind_x, wind_y, wind_z;
     float pad4;
+    float gravity_x, gravity_y, gravity_z;
+    float pad11;
 };
 
 void main() {
@@ -45,8 +47,11 @@ void main() {
 
     vec3 vel = velocities[idx].xyz;
 
-    // Semi-implicit Euler — step() zeros gravity for pinned particles (w == 0)
-    vel += vec3(0.0, gravity, 0.0) * dt * step(0.001, w);
+    // Semi-implicit Euler. Gravity is supplied in solver-LOCAL space by the CPU
+    // (CPU computes local = basis_inv * world_gravity), so rotating the solver
+    // node leaves world-space gravity direction unchanged. step() zeros gravity
+    // for pinned particles (w == 0).
+    vel += vec3(gravity_x, gravity_y, gravity_z) * dt * step(0.001, w);
     vel += vec3(wind_x, wind_y, wind_z) * dt * step(0.001, w);
 
     // Clamp velocity to prevent runaway

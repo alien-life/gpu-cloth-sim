@@ -17,6 +17,7 @@ layout(push_constant, std430) uniform Params {
     float pad2;
     float pad3, pad4, pad5, pad6;
     float pad7, pad8, pad9, pad10;
+    float gravity_x, gravity_y, gravity_z, pad11;
 };
 
 void main() {
