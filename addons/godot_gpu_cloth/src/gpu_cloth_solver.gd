@@ -21,6 +21,16 @@ extends Node3D
 @export var pin_top_row: bool = false
 @export var pin_smooth_speed: float = 20.0
 
+@export_group("Fishing Line")
+## Hard-clamp each free particle to within stretch_factor × rest distance
+## of its nearest pin's CURRENT position. Eliminates the "rubber band" droop
+## that comes from slow tension propagation through the spring network.
+@export var enable_fishing_line: bool = true
+## How much the fishing-line distance is allowed to exceed the rest distance.
+## 1.0 = perfectly inelastic, 1.02 = 2 % stretch (default — feels stiff but alive),
+## 1.10+ = visibly slack.
+@export var fishing_stretch: float = 1.02
+
 @export_group("Colliders")
 @export var collider_targets: Array[NodePath] = []
 
@@ -82,6 +92,13 @@ var _pin_map: Array[Dictionary] = []
 var _prev_global_pos: Vector3
 
 var _has_pending_readback: bool = false
+
+# Fishing-line anchors
+var _anchors_buffer: RID
+var _fishing_shader: RID
+var _fishing_pipeline: RID
+var _fishing_uniform_set: RID
+var _has_anchors: bool = false
 
 # Voxel occlusion
 var _voxel_buffer: RID
@@ -213,6 +230,19 @@ func _ready() -> void:
 		_make_uniform(1, _predicted_buffer),
 		_make_uniform(4, _colliders_buffer),
 	])
+
+	# Fishing-line anchor setup — only allocate if any pin exists
+	if enable_fishing_line:
+		var anchor_data: PackedFloat32Array = _build_anchors(pos_data)
+		if _has_anchors:
+			var anchor_bytes: PackedByteArray = anchor_data.to_byte_array()
+			_anchors_buffer = _rd.storage_buffer_create(anchor_bytes.size(), anchor_bytes)
+			_fishing_shader = _load_shader(_plugin_dir + "/shaders/compute/cloth_fishing.glsl")
+			_fishing_pipeline = _rd.compute_pipeline_create(_fishing_shader)
+			_fishing_uniform_set = _create_uniform_set(_fishing_shader, [
+				_make_uniform(0, _predicted_buffer),
+				_make_uniform(1, _anchors_buffer),
+			])
 
 	# Voxel occlusion setup
 	if voxel_ao_enabled:
@@ -365,6 +395,19 @@ func _physics_process(delta: float) -> void:
 				_rd.compute_list_set_push_constant(cl, push_data, push_data.size())
 				_rd.compute_list_dispatch(cl, ceili(float(group.count) / 64.0), 1, 1)
 				_rd.compute_list_add_barrier(cl)
+
+		# Fishing-line clamp (Sucker Punch trick) — propagates pin tension in O(1)
+		if _has_anchors:
+			var fishing_push := PackedByteArray()
+			fishing_push.resize(16)
+			fishing_push.encode_u32(0, _particle_count)
+			fishing_push.encode_float(4, fishing_stretch)
+			# 8-15: padding
+			_rd.compute_list_bind_compute_pipeline(cl, _fishing_pipeline)
+			_rd.compute_list_bind_uniform_set(cl, _fishing_uniform_set, 0)
+			_rd.compute_list_set_push_constant(cl, fishing_push, fishing_push.size())
+			_rd.compute_list_dispatch(cl, particle_groups, 1, 1)
+			_rd.compute_list_add_barrier(cl)
 
 		# Collide
 		if _collider_count > 0:
@@ -563,6 +606,64 @@ func _push_constraint(data: PackedFloat32Array, a: int, b: int, rest: float, k: 
 	data.append(float(b))
 	data.append(rest)
 	data.append(k)
+
+
+func _build_anchors(pos_data: PackedFloat32Array) -> PackedFloat32Array:
+	# vec2 per particle: (uintBitsToFloat(anchor_idx), rest_distance).
+	# Pinned particles point to themselves so the shader early-outs.
+	# If no pins exist, _has_anchors stays false and we never dispatch.
+	var data := PackedFloat32Array()
+	data.resize(_particle_count * 2)
+
+	var pinned_indices: PackedInt32Array = PackedInt32Array()
+	var pinned_positions: PackedVector3Array = PackedVector3Array()
+	for i in _particle_count:
+		if pos_data[i * 4 + 3] == 0.0:
+			pinned_indices.append(i)
+			pinned_positions.append(Vector3(
+				pos_data[i * 4],
+				pos_data[i * 4 + 1],
+				pos_data[i * 4 + 2]
+			))
+
+	_has_anchors = not pinned_indices.is_empty()
+	if not _has_anchors:
+		# Self-pointing fallback so the buffer is still well-formed if ever uploaded
+		var bytes := PackedByteArray()
+		bytes.resize(4)
+		for i in _particle_count:
+			bytes.encode_u32(0, i)
+			data[i * 2] = bytes.decode_float(0)
+			data[i * 2 + 1] = 0.0
+		return data
+
+	var idx_bytes := PackedByteArray()
+	idx_bytes.resize(4)
+	for i in _particle_count:
+		if pos_data[i * 4 + 3] == 0.0:
+			idx_bytes.encode_u32(0, i)
+			data[i * 2] = idx_bytes.decode_float(0)
+			data[i * 2 + 1] = 0.0
+			continue
+
+		var p: Vector3 = Vector3(
+			pos_data[i * 4],
+			pos_data[i * 4 + 1],
+			pos_data[i * 4 + 2]
+		)
+		var best_idx: int = pinned_indices[0]
+		var best_d2: float = INF
+		for j in pinned_indices.size():
+			var d2: float = p.distance_squared_to(pinned_positions[j])
+			if d2 < best_d2:
+				best_d2 = d2
+				best_idx = pinned_indices[j]
+
+		idx_bytes.encode_u32(0, best_idx)
+		data[i * 2] = idx_bytes.decode_float(0)
+		data[i * 2 + 1] = sqrt(best_d2)
+
+	return data
 
 
 # ── Mesh ───────────────────────────────────────────────────────
@@ -892,6 +993,10 @@ func _exit_tree() -> void:
 		_rd.free_rid(_solve_shader)
 		_rd.free_rid(_update_shader)
 		_rd.free_rid(_collide_shader)
+		if _has_anchors:
+			_rd.free_rid(_anchors_buffer)
+			_rd.free_rid(_fishing_pipeline)
+			_rd.free_rid(_fishing_shader)
 		if voxel_ao_enabled:
 			_rd.free_rid(_voxel_buffer)
 			_rd.free_rid(_ao_buffer)

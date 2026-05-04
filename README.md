@@ -10,6 +10,10 @@ GPU-accelerated cloth simulation for Godot 4.5+ using Position-Based Dynamics on
 ## Support
 Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 
+## What's New in 1.3.0
+
+- **Fishing-line anchor constraint** — borrowed from the Ghost of Tsushima cloth pipeline. PBD's spring network propagates tension one link per iteration, so a tall cape's bottom row keeps drooping for several frames before the top pin "tells" it to stop. The fishing line precomputes each particle's nearest pin and rest distance, then hard-clamps every free particle to within `fishing_stretch × rest_distance` of that pin's *current* position each substep — propagating tension in O(1) instead of O(grid). Lets stiff cloth actually feel stiff at low iteration counts. One extra compute pass, ~particle_count threads, no graph-coloring needed (each thread reads only its own anchor's position). Disable via `enable_fishing_line` if you want pure PBD behaviour.
+
 ## What's New in 1.2.0
 
 - **Per-particle voxel ambient occlusion** — a 5th compute pass voxelizes the cloth's particles into a small bit-packed grid (default 32×32×16) each frame, then samples a neighborhood per particle to compute occlusion. The result is read back alongside positions, written to vertex `COLOR.r` (visibility), and consumed by the surface shader as Godot's `AO` builtin output. Folds darken naturally with no screen-space noise, view-independent, ~0.2 ms on a mid-range GPU.
@@ -35,6 +39,7 @@ Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 - **Wind** with organic turbulence via sum-of-sines at irrational frequency ratios
 - **Structural, diagonal, and bending constraints** for controllable stiffness vs. drape
 - **Pin targets** — pin particles to `Marker3D` nodes or auto-pin the top row, with per-pin smoothing to prevent snap on fast motion
+- **Fishing-line anchor constraint** — Ghost-of-Tsushima-style hard distance clamp from each particle to its nearest pin, so tension propagates instantly instead of one spring-link per iteration
 - **Procedural fabric shader** — silk / linen / animated lava with border trim (per-edge bitmask), emblem layer, dirt, and wear, all parameterized
 - **Shape-mask cutout** — bind a `sampler2D` to mask out non-rectangular cloth shapes via fragment `discard`
 - **Per-particle voxel ambient occlusion** — cloth folds darken naturally via a per-frame voxelization compute pass, no screen-space noise
@@ -87,6 +92,8 @@ zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
 | `pin_targets` | `Array[NodePath]` | `[]` | `Marker3D` nodes to pin nearest particles to |
 | `pin_top_row` | `bool` | `false` | Auto-pin all particles in row 0 |
 | `pin_smooth_speed` | `float` | `20.0` | Lerp speed for pin tracking. Higher = stiffer follow. `0` freezes pins at their initial position. |
+| `enable_fishing_line` | `bool` | `true` | Hard-clamp each free particle to within `fishing_stretch × rest_distance` of its nearest pin's current position each substep. Eliminates rubber-band droop. Skipped when no pins exist. |
+| `fishing_stretch` | `float` | `1.02` | Allowed slack on the fishing-line distance. `1.0` = perfectly inelastic, `1.02` = 2% stretch, `1.10+` = visibly slack. |
 | `collider_targets` | `Array[NodePath]` | `[]` | Explicit collider list (e.g. for colliders living elsewhere in the tree). When empty, the solver falls back to scanning direct children for `GPUClothCollider` nodes. |
 | `cloth_material` | `Material` | `null` | Override material (default: built-in procedural fabric shader) |
 | `inertia_scale` | `Vector3` | `(1,1,1)` | How strongly cloth resists parent movement |
@@ -117,11 +124,14 @@ Each frame, the solver runs a 4-phase compute pipeline inside a single command l
 for each substep:
     PREDICT  →  apply gravity, wind, inertia offset
     SOLVE    →  PBD distance constraints (14 graph-colored groups × N iterations)
+    FISHING  →  clamp each free particle to within stretch × rest of its nearest pin (optional)
     COLLIDE  →  project particles out of collision primitives
     UPDATE   →  recover velocity from position delta, apply damping
 ```
 
 Constraint groups are graph-colored so no two constraints in a group share a particle — this eliminates data races without atomics. The solver dispatches each group separately with GPU barriers between them.
+
+The optional **fishing-line pass** runs once per substep after the spring solve. At init, each particle records the index of its nearest pin and the rest distance to that pin. Each substep the compute shader reads the pin's *current* position, computes the vector to its assigned particle, and if the length exceeds `fishing_stretch × rest_distance` clamps it back onto the sphere of radius `fishing_stretch × rest_distance` around the pin. Tension propagates from any pin to any particle in a single shader invocation — no cascading through the spring network. The pass touches only its own particle's position so no graph-coloring is required.
 
 Particle positions are stored as `vec4(x, y, z, inverse_mass)` where `inverse_mass = 0` means pinned and `inverse_mass = 1` means free. This encoding lets the constraint solver naturally handle pin/free weighting in a single code path.
 
