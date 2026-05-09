@@ -43,5 +43,7 @@ sim_mask_channel = 1
 skin_attach_radius = 3.0
 cloth_material = ExtResource("3_xqxyl")
 rotational_inertia_scale = 0.4
+debug_show_particles = true
+debug_show_targets = true
 voxel_ao_radius = 5
 metadata/_custom_type_script = "uid://qye8225q0tk8"
