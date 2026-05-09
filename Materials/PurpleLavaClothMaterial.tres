@@ -5,7 +5,7 @@
 [resource]
 render_priority = 0
 shader = ExtResource("1_87gqx")
-shader_parameter/fabric_type = 1
+shader_parameter/fabric_type = 0
 shader_parameter/fabric_scale = 38.30400177194
 shader_parameter/fabric_normal_intensity = 0.0
 shader_parameter/primary_color = Color(0.6818438, 0.0018568843, 0.8629713, 1)

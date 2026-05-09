@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://d0vun6x32mhqe" path="res://LowPolyDude/Assets/LowPolyDude.glb" id="1_0dm3n"]
 [ext_resource type="Script" uid="uid://qye8225q0tk8" path="res://addons/godot_gpu_cloth/src/gpu_cloth_solver.gd" id="2_l06dg"]
-[ext_resource type="Material" uid="uid://kuybxqt3y8i8" path="res://Materials/PurpleLavaClothMaterial.tres" id="3_48day"]
+[ext_resource type="Material" uid="uid://cq5v10lrjxill" path="res://Materials/LavaClothMaterial.tres" id="3_xqxyl"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_uouya"]
 vertex_color_use_as_albedo = true
@@ -41,7 +41,7 @@ skeleton = NodePath("../Skeleton3D")
 sim_mask_from_vertex_color = true
 sim_mask_channel = 1
 skin_attach_radius = 3.0
-cloth_material = ExtResource("3_48day")
+cloth_material = ExtResource("3_xqxyl")
 rotational_inertia_scale = 0.4
 voxel_ao_radius = 5
 metadata/_custom_type_script = "uid://qye8225q0tk8"
