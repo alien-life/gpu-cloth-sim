@@ -18,6 +18,9 @@ layout(push_constant, std430) uniform Params {
     float pad3, pad4, pad5, pad6;
     float pad7, pad8, pad9, pad10;
     float gravity_x, gravity_y, gravity_z, pad11;
+    // Rotational inertia quaternion — only consumed by the predict shader; kept
+    // here as padding so the shared push constant range matches across pipelines.
+    float pad_qx, pad_qy, pad_qz, pad_qw;
 };
 
 void main() {

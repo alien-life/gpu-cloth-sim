@@ -1,6 +1,6 @@
 # v2.0 — Custom Mesh Support
 
-**Status:** planning
+**Status:** implemented/stabilized in the v2.0 working tree. This document is now historical design context; the README is the source of truth for current user-facing behavior.
 **Tracking issue:** GitHub request for arbitrary `Mesh` as the cloth source instead of auto-generated planar grids.
 **Estimated effort:** ~1 focused week, or 2 weeks of evening work.
 
@@ -81,7 +81,7 @@ Goal: load a `Mesh` resource, weld duplicate vertices, populate the positions bu
 
 Tasks:
 - [ ] New helper `_extract_mesh_data(mesh: Mesh) -> Dictionary` that calls `mesh.surface_get_arrays(0)` and returns `{vertices, normals, uvs, colors, indices}`.
-- [ ] New helper `_weld_vertices(vertices: PackedVector3Array, epsilon: float) -> Dictionary` that returns `{welded_positions: PackedVector3Array, original_to_welded: PackedInt32Array}`. Implementation: hash quantized position (`Vector3i(round(v / epsilon))`) into a `Dictionary`, accumulate.
+- [ ] New helper `_weld_vertices(vertices: PackedVector3Array, epsilon: float) -> Dictionary` that returns `{welded_positions: PackedVector3Array, original_to_welded: PackedInt32Array}`. Implementation: spatial-hash positions, check neighboring cells by distance, accumulate.
 - [ ] In `_ready()`, branch on `source_mesh != null`:
   - if assigned, call extract + weld → seed `pos_data` from welded positions
   - else, existing `_build_positions()` produces the planar grid (eventually rewrap as a mesh internally for unified path)
@@ -103,14 +103,14 @@ Deliverable: a `source_mesh` cube falls under gravity, structural+bending constr
 
 ### Phase 3 — Runtime graph coloring
 
-Goal: replace the hand-crafted 14-group grid coloring with a topology-driven greedy coloring.
+Goal: add topology-driven greedy coloring for source meshes while keeping the legacy grid coloring path compatible.
 
 Tasks:
 - [ ] After constraints are built, run greedy coloring:
   ```
   for each constraint c in some order:
-      for g in 0..groups.size():
-          if g doesn't already contain a vertex shared with c:
+	  for g in 0..groups.size():
+		  if g doesn't already contain a vertex shared with c:
               groups[g].append(c)
               break
       else:

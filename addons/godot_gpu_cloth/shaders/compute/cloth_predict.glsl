@@ -21,6 +21,9 @@ layout(push_constant, std430) uniform Params {
     float pad4;
     float gravity_x, gravity_y, gravity_z;
     float pad11;
+    // Per-substep rotational-inertia quaternion in solver-local space. Identity
+    // (0,0,0,1) = parent did not rotate this frame -> rotation displacement is zero.
+    float inertia_qx, inertia_qy, inertia_qz, inertia_qw;
 };
 
 void main() {
@@ -35,9 +38,17 @@ void main() {
     }
     vec3 pos = positions[idx].xyz;
 
-    // Reference frame correction — compensate for parent movement so free particles have inertia
-    // Clamp inertia to prevent cloth collapse during fast movement
+    // Reference frame correction — compensate for parent movement so free particles have inertia.
+    // Translation: inertia_xyz is the per-substep solver-local translation delta.
+    // Rotation:    inertia_q is a per-substep quaternion in solver-local space; rotating this
+    //              particle's position by it gives the position the cloth would reach if it
+    //              rotated WITH the parent, so (pos - rotated) is the lag displacement we want
+    //              to add. Identity quaternion -> zero displacement.
     vec3 inertia = vec3(inertia_x, inertia_y, inertia_z);
+    vec4 q = vec4(inertia_qx, inertia_qy, inertia_qz, inertia_qw);
+    vec3 rotated = pos + 2.0 * cross(q.xyz, cross(q.xyz, pos) + q.w * pos);
+    inertia += pos - rotated;
+    // Clamp combined translation+rotation inertia per substep to prevent cloth collapse during fast movement.
     float inertia_len = length(inertia);
     float max_inertia = max_speed * dt * 0.5;
     if (inertia_len > max_inertia) {

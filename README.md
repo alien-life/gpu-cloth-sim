@@ -10,6 +10,47 @@ GPU-accelerated cloth simulation for Godot 4.5+ using Position-Based Dynamics on
 ## Support
 Join the discord for support :) -- https://discord.gg/maFsFAfqnY
 
+## What's New in 2.1.0
+
+Bone-driven attachment + per-vertex sim mask. Drop a skinned cape into the solver, paint a mask layer in Blender saying "rigid here, free here," and the solver does the right thing on the same mesh — collar tracks the spine bone every frame, hem swings under gravity, smooth blending in between. The standard production-cloth pipeline, with no in-engine UI required. Three pieces compose:
+
+- **Bone bindings from imported mesh.** New `skeleton: NodePath` export. The solver reads `ARRAY_BONES`/`ARRAY_WEIGHTS` from the source mesh, captures each bone's init pose in solver-local space, and per frame uploads `Skeleton3D.get_bone_global_pose(b)` to a small mat4 buffer. A new compute pass (`cloth_skinning.glsl`) skins each particle's *attachment target* per substep — same compute primitive as the v1.4 fishing-line pass, just with bone matrices replacing pin positions.
+- **Continuous sim mask** painted as a vertex color attribute. New `sim_mask_from_vertex_color` + `sim_mask_channel` exports. `mask = 0` (paint black) → particle rigidly follows its skinned target every frame. `mask = 1` (paint white) → free PBD simulation, bounded by `skin_attach_radius`. Smooth values lerp the attachment stiffness — this is the keystone for "tight chest, loose hem on the same garment." The continuous mask subsumes v2.0's binary `pin_from_vertex_color`, which is now deprecated and forwards to the new path with threshold-0.5 binarization.
+- **Same mask, three target sources.** When `skeleton` is wired, the target is bone-driven. When `pin_targets` (`Marker3D`s) are set instead, the target is the K-nearest pin blend. When neither is wired, the target is the particle's init local position. The mask interpretation is identical across all three regimes — lets you drop a painted cape in the solver and see the mask working before you wire up a skeleton, then add the skeleton incrementally.
+
+> **Migration:** `pin_from_vertex_color` keeps working with a deprecation warning. Note the semantic flip when migrating: the old "high channel value = pinned" became "low channel value = rigid" in the continuous mask. If you painted *white-where-pinned* in Blender for v2.0, you'll want to invert that channel for the new continuous mask (or just keep using the deprecated path until you re-paint).
+
+## Blender Authoring Pipeline
+
+The end-to-end workflow for a skinned cape (or any garment):
+
+1. **Model the garment** in Blender. Standard modelling — keep topology cloth-friendly (avoid degenerate triangles), UV unwrap normally.
+2. **Rig.** Parent the garment to your character's existing armature (`Object → Parent → With Empty Groups` if you'll paint weights manually). For a cape you typically need 1-3 bones (spine top, neck, optionally a controller for the cape itself).
+3. **Weight paint bones.** Standard Blender Weight Paint mode. Paint full weight to the parent bone(s) on the **collar / attachment region**. Leave the **simulation region** unweighted — those particles aren't bone-driven, they'll be pure simulation.
+4. **Add the `sim_mask` vertex color layer.**
+   - In `Object Data Properties → Color Attributes`, add a new `Face Corner ▸ Byte Color` attribute named `sim_mask`. (Float Color works too; both export to `.glb` as vertex color.)
+   - Switch to Vertex Paint mode, select the new attribute as the active one.
+   - **Paint black** where the cloth should rigidly follow bones (collar, chest panel — the bone-weighted region from step 3).
+   - **Paint white** where the cloth should freely simulate (hem, sleeves — the unweighted region).
+   - **Paint grey** for soft attachment falloff (the transition strip between rigid and free, typically 1-3 cm wide).
+   - The mask uses the **alpha channel** by default (matches industry convention). Switch to alpha-only painting in Vertex Paint, or paint into RGBA and set `sim_mask_channel` to whichever channel you used.
+5. **Export `.glb`** with Mesh + Armature. Tick "Vertex Colors" and "Skinning" in the export panel.
+6. **In Godot:** add a `GPUClothSolver` node. Set `source_mesh` to the imported mesh. Set `skeleton` to the imported armature's `Skeleton3D` node. Toggle `sim_mask_from_vertex_color = true`. Run.
+
+Mental model: **bone weights say *where* the cloth attaches; the sim_mask says *how rigidly*.** They're orthogonal channels of authoring intent. The mask works without a skeleton too — useful for debugging the painting before wiring up rigging — in which case `mask = 0` particles freeze at their init local position and `mask = 1` particles soft-attach to init within `skin_attach_radius`.
+
+## What's New in 2.0.0
+
+Custom-mesh source. The solver no longer hardcodes a planar grid — assign any `Mesh` resource (imported `.gltf`/`.fbx`/`.obj` or a programmatic `ArrayMesh`) to the new `source_mesh` export and the cloth simulates on that mesh's actual topology. UV seams persist; pins can be painted in Blender via vertex color; bending behaviour is derived from edge-shared triangle pairs. Five things compose to make this work:
+
+- **Vertex welding** — imported meshes duplicate vertices at UV seams and hard-normal edges (same world position appears 2-6 times). Without welding the simulation tears apart at every seam. The solver spatial-hashes positions, checks neighboring cells by true distance against `weld_epsilon`, and collapses coincident verts into a unique particle set while keeping a remap from original render slots to welded particles.
+- **Topology-driven constraints** — structural constraints are emitted from each unique edge in the welded mesh, with rest distance set from the initial Euclidean separation. Bending constraints come from edge-shared triangle pairs (the two non-shared vertices) instead of the v1.x grid-specific "skip-one" pattern. Toggle via `bending_from_topology`.
+- **Runtime graph coloring** — source-mesh constraints are colored at init. A greedy coloring pass walks the constraint list and places each constraint into the first group whose vertex set doesn't already contain either endpoint. The solver dispatch loop iterates `_constraint_groups` so arbitrary topology produces correct race-free dispatches.
+- **Render-vertex preservation** — the simulation runs on welded particles but rendering uses the input mesh's original vertex slots, indices, and UVs. Two slots on either side of a UV seam map to the same particle (so they get the same world position) but keep their distinct UVs and per-face normals. Tangents are recomputed per-frame from UV gradients.
+- **Vertex-color pin authoring** — flip `pin_from_vertex_color`, set a channel + threshold, and weight-paint a pin mask in Blender. Welded particles whose source vertices exceed the threshold are marked `inverse_mass = 0`. `pin_targets` (`Marker3D` based) still works for dynamic anchors.
+
+> **Compatibility:** existing scenes with no `source_mesh` assigned keep the original `cloth_width × cloth_height` grid path unchanged. `pin_top_row` is honoured only on the grid path; with a `source_mesh` it's ignored (with a warning).
+
 ## What's New in 1.4.0
 
 The fishing-line constraint matures from "single nearest pin" into a properly generalized binding system. Three changes that compose:
@@ -86,8 +127,8 @@ zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
 ## Quick Start
 
 1. Add a **GPUClothSolver** node to your scene
-2. Set `cloth_width`, `cloth_height`, and `particle_spacing` to define the grid
-3. Enable `pin_top_row` (or add `Marker3D` children and assign them to `pin_targets`)
+2. For procedural grid cloth, set `cloth_width`, `cloth_height`, and `particle_spacing`; for imported cloth, assign `source_mesh`
+3. Pin grid cloth with `pin_top_row`, or add `Marker3D` children and assign them to `pin_targets`; source meshes can also use `pin_from_vertex_color`
 4. Optionally add **GPUClothCollider** children for collision
 5. Run the scene
 
@@ -95,9 +136,12 @@ zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `cloth_width` | `int` | `20` | Particles along X axis |
-| `cloth_height` | `int` | `20` | Particles along Y axis |
-| `particle_spacing` | `float` | `0.1` | Distance between adjacent particles |
+| `source_mesh` | `Mesh` | `null` | When assigned, the cloth's particles, constraints, and rendering geometry all derive from this mesh. Overrides `cloth_width`/`cloth_height`/`particle_spacing`. Imported meshes (`.gltf`/`.fbx`/`.obj`) and programmatic `ArrayMesh` both work. |
+| `weld_epsilon` | `float` | `0.001` | Vertex coalescing tolerance. Vertices closer than this are merged into a single simulated particle so UV seams and hard-normal edges don't tear the cloth apart. Loosen for low-precision exports; tighten for CAD-precise meshes with intentional small features. |
+| `bending_from_topology` | `bool` | `true` | Build bending constraints from edge-shared triangle pairs. Off = only structural (edge-length) constraints, cloth will be very droopy. Source-mesh path only. |
+| `cloth_width` | `int` | `20` | Particles along X axis (ignored when `source_mesh` is assigned) |
+| `cloth_height` | `int` | `20` | Particles along Y axis (ignored when `source_mesh` is assigned) |
+| `particle_spacing` | `float` | `0.1` | Distance between adjacent particles (ignored when `source_mesh` is assigned) |
 | `gravity_strength` | `float` | `-9.8` | Gravity acceleration |
 | `solver_iterations` | `int` | `8` | Constraint solver passes per substep |
 | `substeps` | `int` | `8` | Physics substeps per frame |
@@ -106,11 +150,19 @@ zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
 | `damping` | `float` | `0.99` | Velocity damping per substep |
 | `max_speed` | `float` | `5.0` | Velocity clamp |
 | `pin_targets` | `Array[NodePath]` | `[]` | `Marker3D` nodes to pin nearest particles to |
-| `pin_top_row` | `bool` | `false` | Auto-pin all particles in row 0 |
+| `pin_top_row` | `bool` | `false` | Auto-pin all particles in row 0. Grid path only; ignored when `source_mesh` is assigned. |
 | `pin_smooth_speed` | `float` | `20.0` | Lerp speed for pin tracking. Higher = stiffer follow. `0` freezes pins at their initial position. |
-| `enable_fishing_line` | `bool` | `true` | Master toggle. Hard-clamps each free particle to within `stretch × rest_distance` of the weighted blend of its K nearest pins. Velocity at the boundary has its outward radial component zeroed. Skipped when no pins exist. |
+| `pin_from_vertex_color` | `bool` | `false` | **DEPRECATED in 2.1.0** — prefer `sim_mask_from_vertex_color`. Kept for compat: when on (and the new mask is off), binarizes `pin_color_channel` at `pin_color_threshold` and forwards to the new path. |
+| `pin_color_threshold` | `float` | `0.5` | Channel value at/above which a vertex is treated as pinned (legacy binary path) |
+| `pin_color_channel` | `int` (0–3) | `3` | `0=R, 1=G, 2=B, 3=A`. Alpha is the conventional choice. Used by both the legacy binary path and as the channel for the deprecation forwarding. |
+| `skeleton` | `NodePath` | `(empty)` | Source-mesh path only. `Skeleton3D` whose bones drive the cloth's per-particle attachment targets via the imported mesh's `ARRAY_BONES`/`ARRAY_WEIGHTS`. When unset, falls back to pin markers, then to init local positions. |
+| `sim_mask_from_vertex_color` | `bool` | `false` | Source-mesh path only. Read a continuous per-particle attachment-stiffness mask from vertex color. `0` = particle rigidly follows its skinned target; `1` = free PBD simulation; smooth values lerp between. The keystone for "tight chest, loose hem" authoring on a single garment. |
+| `sim_mask_channel` | `int` (0–3) | `3` | `0=R, 1=G, 2=B, 3=A`. Alpha is the convention. |
+| `skin_attach_radius` | `float` | `0.5` | At `mask = 1`, the maximum distance a particle can drift from its skinned target before being projected back. At `mask = 0`, this is forced to 0 (rigid). Linearly interpolated in between. Tighten for accessories; loosen for billowy cloaks. |
+| `skin_velocity_damp` | `bool` | `true` | Zero the outward radial velocity component when a particle hits its attachment boundary, so it slides along instead of buzzing. Same trick the fishing line uses. |
+| `enable_fishing_line` | `bool` | `true` | Master toggle. Hard-clamps each free particle to within `stretch × rest_distance` of the weighted blend of its K nearest pins. Velocity at the boundary has its outward radial component zeroed. Skipped when no pins exist. The per-binding `max_dist` is multiplied by the per-particle sim mask, so the same mask owns attachment stiffness across pin and skinning paths. |
 | `fishing_stretch` | `float` | `1.02` | Default stretch multiplier when `stretch_curve` is unassigned. `1.0` = perfectly inelastic, `1.02` = 2% stretch, `1.10+` = visibly slack. |
-| `stretch_curve` | `Curve` | `null` | Optional per-row stretch override sampled by `row_index / (cloth_height - 1)`. `t = 0` is the top row, `t = 1` is the bottom. When assigned (and non-empty), takes precedence over `fishing_stretch`. |
+| `stretch_curve` | `Curve` | `null` | Optional stretch override. Grid cloth samples `row_index / (cloth_height - 1)`; source meshes sample top-to-bottom across local Y bounds. `t = 0` is top, `t = 1` is bottom. When assigned (and non-empty), takes precedence over `fishing_stretch`. |
 | `bindings_per_particle` | `int` (1–8) | `4` | How many of each particle's nearest pins it binds to. `K = 1` reproduces v1.3 single-anchor behaviour. `K = 4` smooths Voronoi seams between multiple pins. Higher = smoother blends, bigger binding buffer. |
 | `collider_targets` | `Array[NodePath]` | `[]` | Explicit collider list (e.g. for colliders living elsewhere in the tree). When empty, the solver falls back to scanning direct children for `GPUClothCollider` nodes. |
 | `cloth_material` | `Material` | `null` | Override material (default: built-in procedural fabric shader) |
@@ -233,18 +285,23 @@ The shader writes Godot's `AO` builtin output (with `AO_LIGHT_AFFECT = 0.4`), wh
 
 ## How It Works
 
-Each frame, the solver runs a 4-phase compute pipeline inside a single command list:
+Each frame, the solver runs a 5-phase compute pipeline inside a single command list:
 
 ```
 for each substep:
     PREDICT  →  apply gravity, wind, inertia offset
-    SOLVE    →  PBD distance constraints (14 graph-colored groups × N iterations)
+    SOLVE    →  PBD distance constraints (each graph-colored group × N iterations)
     FISHING  →  clamp each free particle to within stretch × rest of its nearest pin (optional)
+    SKIN     →  bone-driven attachment + sim-mask stiffness clamp (when wired)
     COLLIDE  →  project particles out of collision primitives
     UPDATE   →  recover velocity from position delta, apply damping
 ```
 
-Constraint groups are graph-colored so no two constraints in a group share a particle — this eliminates data races without atomics. The solver dispatches each group separately with GPU barriers between them.
+Constraint groups are graph-colored so no two constraints in a group share a particle — this eliminates data races without atomics. The solver dispatches each group separately with GPU barriers between them. The procedural grid keeps its fixed compatibility groups; source meshes generate groups at init with a greedy pass over the constraint list, placing each constraint into the first group whose vertex set doesn't already contain either endpoint.
+
+When a `source_mesh` is assigned, the input mesh's triangle topology drives constraint generation across all valid triangle surfaces: vertices are welded by a spatial hash plus distance check so duplicates at UV seams collapse into one simulated particle, then each unique edge becomes a structural constraint and each edge-shared triangle pair becomes a bending constraint between the two non-shared vertices. Rendering still uses the original (un-welded) vertex slots, indices, and UVs, so UV seams persist visually — the per-frame mesh writeback scatters welded particle positions back to all original slots that map to them. The mesh is read during `_ready()`; changing `source_mesh` at runtime requires recreating the solver node for now. Imported skinning weights are not consumed yet.
+
+The optional **skinning pass** runs once per substep, immediately after fishing-line and before collision. At init, the solver reads `ARRAY_BONES` and `ARRAY_WEIGHTS` from the source mesh, captures each bone's init pose in solver-local space, and per particle bakes a 112-byte `SkinBinding` containing 4 bone indices + weights, 4 rest-offsets (one per bone, computed as `inverse(bone_init_in_solver) · particle_init_pos`), and an `effective_max_dist = mask × skin_attach_radius`. Each frame the CPU re-packs the bones' current world poses into a column-major `mat4` buffer (slot 0 always identity for the no-skeleton fallback path), and the compute shader computes `target = sum_i(bones[idx[i]] · vec4(rest_offset[i], 1) · weight[i])`, projects the particle onto the attachment-sphere boundary if it's drifted past `effective_max_dist`, and zeros outward radial velocity (same trick as the fishing-line pass). Mask=0 particles get `inverse_mass = 0` from the CPU side and have their predicted position overwritten with `target` unconditionally — that's the rigid attachment path. Particles owned by an explicit `Marker3D` pin are emitted with all-zero weights so the skin pass no-ops on them and the fishing-line pass owns them. The pass is skipped entirely when nothing wires it (no skeleton AND no mask), preserving v2.0's freefall behaviour for pin-only and constraint-only source meshes.
 
 The optional **fishing-line pass** runs once per substep after the spring solve. At init, each particle records its K nearest pins, their per-binding max distances (`rest_distance × stretch`, where `stretch` comes from the curve or the scalar fallback), and inverse-square weights normalized to sum to 1.0. Each substep the compute shader walks the K bindings, reads the pins' *current* positions, accumulates a weighted-blend target position and a weighted-blend max distance, and if the particle is outside that sphere projects it back onto the boundary. The outward radial component of velocity is zeroed at the same time so the particle slides along the boundary instead of buzzing against it. Tension propagates from any pin to any particle in a single shader invocation — no cascading through the spring network. The pass writes only the dispatch's own particle position and velocity, so no graph-coloring is required.
 
@@ -258,7 +315,7 @@ If `voxel_ao_enabled`, after the cloth substep loop the solver runs two more com
 
 ## Demo
 
-Open `demo/cloth_demo.tscn` for a working example: a cape-sized cloth with top-row pinning and a sphere collider, along with a pinned cloth example.
+Open `demo/cloth_demo.tscn` for working examples: a marker-pinned source mesh with a sphere collider, along with a procedural grid cloth pinned by `Marker3D`.
 
 The `cloth_demo_driver.gd` script (not attached by default) oscillates pins and the collider for stress testing.
 
