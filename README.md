@@ -10,6 +10,7 @@ GPU-accelerated cloth simulation for Godot 4.5+ using Position-Based Dynamics on
 
 
 [![Tutorial](https://img.youtube.com/vi/Ta_X90fqqZ4/hqdefault.jpg)](https://youtu.be/Ta_X90fqqZ4)
+
 ^^ click me
 
 ## Support
@@ -139,18 +140,23 @@ The fishing-line constraint matures from "single nearest pin" into a properly ge
 
 ## Installation
 
-1. Download or clone this repository
-2. Use the Godot AssetLib to import gpu_cloth_sim.zip into your project
+The easiest path is the prebuilt plugin zip — addon code only, ~100 KB:
 
-Or clone the entire repo to try the included demo scene immediately.
+1. Grab `gpu_cloth_sim.zip` from the repo root (or download a release).
+2. In Godot: `AssetLib` tab → top-right install icon → pick the zip → install into your project. Drops everything into `addons/godot_gpu_cloth/`.
+3. `Project → Project Settings → Plugins`, tick **GPU Cloth Sim**.
 
-### Building a ZIP
+To explore the demo scenes (animated human in shirt + pants, low-poly cat, flag, capes), clone the full repo — the `Demo/` folder ships the assets that aren't bundled in the plugin zip (it's ~600 MB of skinned meshes + textures, intentionally kept out of the install zip).
 
-To create an installable ZIP from the repo root:
+### Rebuilding the ZIP
+
+To rebuild `gpu_cloth_sim.zip` from the repo root after changes:
 
 ```bash
-zip -r gpu_cloth_sim.zip addons/ demo/ LICENSE README.md -x "*.import" "*.uid"
+zip -r gpu_cloth_sim.zip addons/ LICENSE README.md -x "*.import" "*.uid" "*.DS_Store"
 ```
+
+Plugin-only — `Demo/` is intentionally excluded for download size. Godot regenerates `.import` and `.uid` files on first project load, so excluding them is safe and produces a smaller zip.
 
 ## Quick Start
 
