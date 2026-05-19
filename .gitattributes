@@ -1,9 +1,11 @@
 # Normalize line endings for all files that Git considers text files.
 * text=auto eol=lf
 
-# Only include the addons and demo folders when downloading from the Asset Library.
-/**        export-ignore
-/addons    !export-ignore
-/addons/** !export-ignore
-/demo      !export-ignore
-/demo/**   !export-ignore
+# Asset Library download = addons/ + LICENSE + README only. Demo/ is intentionally
+# excluded (~634 MB of skinned meshes / textures, too heavy for an install). People
+# who want the demo scenes clone the full repo from GitHub instead.
+/**          export-ignore
+/addons      !export-ignore
+/addons/**   !export-ignore
+/LICENSE     !export-ignore
+/README.md   !export-ignore
