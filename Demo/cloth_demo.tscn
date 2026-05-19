@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://buw11jtfgmi3w" path="res://Demo/Assets/LowPolyDude/low_poly_dude.tscn" id="5_4ugnp"]
 [ext_resource type="Script" uid="uid://14lxj2qkuxpd" path="res://Demo/spin.gd" id="6_2mwl1"]
-[ext_resource type="PackedScene" uid="uid://bxilxn0oceis1" path="res://green_flag.tscn" id="7_7a6gk"]
+[ext_resource type="PackedScene" uid="uid://bxilxn0oceis1" path="res://Demo/Assets/GreenFlag/green_flag.tscn" id="7_7a6gk"]
 [ext_resource type="PackedScene" uid="uid://b3v7p5xqp4ble" path="res://Demo/Assets/LowPolyDude/playable_dude.tscn" id="7_bej34"]
 [ext_resource type="PackedScene" uid="uid://d4lfeh8pcjiyx" path="res://Demo/Assets/Cat/GoodTopoTest/weight_painted_good_topo.tscn" id="7_ede1e"]
 [ext_resource type="Script" uid="uid://dei73to1xbtsc" path="res://Demo/sine_wiggle.gd" id="7_wiggle"]
@@ -86,4 +86,4 @@ script = ExtResource("7_wiggle")
 frequency = 0.5
 
 [node name="GreenFlag" parent="." instance=ExtResource("7_7a6gk")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -3, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5550425, -2.4863925, 0)
