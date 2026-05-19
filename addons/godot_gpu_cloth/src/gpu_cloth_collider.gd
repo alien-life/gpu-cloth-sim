@@ -4,10 +4,14 @@ extends Node3D
 
 enum Shape { SPHERE, CAPSULE, BOX }
 
-@export var shape: Shape = Shape.CAPSULE
-@export var radius: float = 0.3
-@export var height: float = 1.6
-@export var extents: Vector3 = Vector3(0.5, 0.5, 0.5)
+@export var shape: Shape = Shape.CAPSULE:
+	set(v): shape = v; update_gizmos()
+@export var radius: float = 0.3:
+	set(v): radius = v; update_gizmos()
+@export var height: float = 1.6:
+	set(v): height = v; update_gizmos()
+@export var extents: Vector3 = Vector3(0.5, 0.5, 0.5):
+	set(v): extents = v; update_gizmos()
 @export var target: NodePath
 
 var _tracked_node: Node3D

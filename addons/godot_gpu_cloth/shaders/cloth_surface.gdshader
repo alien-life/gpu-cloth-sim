@@ -1,6 +1,26 @@
 shader_type spatial;
 render_mode cull_disabled;
 
+// -- v3 substrate (compute-driven positions/normals via Texture2DRD lookup) --
+// The solver writes simulated skeleton-local positions/normals into two
+// storage textures sized to the WELDED particle count. The render mesh's
+// VERTEX_ID indexes its un-welded vertex slots, so we go through a small
+// welded_index_tex (sized to render-vert count) before sampling the position
+// texture. skel_to_mesh_transform converts the simulated skeleton-local
+// position back into the mesh-local space the renderer's model_matrix expects.
+group_uniforms substrate;
+uniform bool      gpu_driven           = false;
+uniform sampler2D positions_tex       : filter_nearest;
+uniform sampler2D normals_tex         : filter_nearest;
+uniform sampler2D welded_index_tex    : filter_nearest;
+uniform int       tex_width           = 4096;
+uniform int       render_tex_width    = 4096;
+uniform mat4      skel_to_mesh_transform;
+// Visual-only outward extrusion along the per-vertex normal, in mesh-local
+// units. Hides body-poke-through when fast animation outruns the cloth solver.
+// Does not affect physics — particles still simulate at their true positions.
+uniform float     render_offset        = 0.0;
+
 // -- Fabric --
 group_uniforms fabric;
 uniform int fabric_type : hint_range(0, 2) = 1; // 0=Lava, 1=Silk, 2=Linen
@@ -65,12 +85,8 @@ uniform float shape_mask_threshold : hint_range(0.0, 1.0) = 0.5;
 uniform vec2 shape_mask_uv_scale = vec2(1.0, 1.0);
 uniform vec2 shape_mask_uv_offset = vec2(0.0, 0.0);
 
-// -- Occlusion (driven by per-vertex COLOR.r from voxel AO pass) --
-group_uniforms occlusion;
-uniform float ao_strength : hint_range(0.0, 2.0) = 1.0;
-uniform float ao_roughness_boost : hint_range(0.0, 0.5) = 0.15;
-
-varying vec4 cloth_ao_color;
+// -- Occlusion uniforms removed in v3.0 (voxel AO scope-cut); the inspector's
+//    ao_strength / ao_roughness_boost knobs are gone. v3.1 may bring SSAO back. --
 
 
 // ==========================================================
@@ -300,7 +316,22 @@ float wear_mask(vec2 uv) {
 // ==========================================================
 
 void vertex() {
-	cloth_ao_color = COLOR;
+	// v3 substrate: VERTEX_ID indexes the render mesh's un-welded vertex slots.
+	// Two-step lookup: welded_index_tex maps render-vert → welded particle,
+	// then positions_tex / normals_tex give the simulated skeleton-local pose.
+	if (gpu_driven) {
+		ivec2 r_coord  = ivec2(int(VERTEX_ID) % render_tex_width,
+		                       int(VERTEX_ID) / render_tex_width);
+		int welded_idx = int(texelFetch(welded_index_tex, r_coord, 0).r);
+		ivec2 p_coord  = ivec2(welded_idx % tex_width,
+		                       welded_idx / tex_width);
+		vec3 skel_pos = texelFetch(positions_tex, p_coord, 0).xyz;
+		vec3 skel_nrm = texelFetch(normals_tex,   p_coord, 0).xyz;
+		VERTEX = (skel_to_mesh_transform * vec4(skel_pos, 1.0)).xyz;
+		NORMAL = normalize(mat3(skel_to_mesh_transform) * skel_nrm);
+		// Outward shell expansion. Pure visual; physics is untouched.
+		VERTEX += NORMAL * render_offset;
+	}
 }
 
 
@@ -385,21 +416,15 @@ void fragment() {
 	fabric_albedo = mix(fabric_albedo, fabric_albedo * 1.5 + vec3(0.05), wear);
 	rough_mod += wear * 0.2;
 
-	// -- Voxel AO (per-vertex cloth_ao_color.r encodes visibility 0..1) --
-	// Half-strength on albedo (avoids double-darkening since AO output also dims ambient).
-	float vis = mix(1.0, cloth_ao_color.r, ao_strength);
-	fabric_albedo *= mix(1.0, vis, 0.5);
-	rough_mod += (1.0 - vis) * ao_roughness_boost;
-
 	// -- Output --
+	// AO output is omitted in v3.0 (voxel AO scope-cut); the renderer's default
+	// (1.0 = unoccluded) applies. v3.1 may restore via screen-space AO.
 	ALBEDO = fabric_albedo;
 	ROUGHNESS = clamp(base_roughness + rough_mod, 0.0, 1.0);
 	METALLIC = metallic;
 	SPECULAR = specular;
 	NORMAL_MAP = fnorm;
 	NORMAL_MAP_DEPTH = fabric_normal_intensity;
-	AO = vis;
-	AO_LIGHT_AFFECT = 0.4;
 
 	if (length(emission) > 0.001) {
 		EMISSION = emission;

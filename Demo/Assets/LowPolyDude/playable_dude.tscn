@@ -1,0 +1,27 @@
+[gd_scene load_steps=4 format=3 uid="uid://b3v7p5xqp4ble"]
+
+[ext_resource type="Script" uid="uid://1hqs12o2mx3f" path="res://Demo/player_controller.gd" id="1_c4s55"]
+[ext_resource type="PackedScene" uid="uid://buw11jtfgmi3w" path="res://Demo/Assets/LowPolyDude/low_poly_dude.tscn" id="2_5ralf"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
+radius = 0.4
+height = 1.7
+
+[node name="PlayableDemo" type="Node3D"]
+
+[node name="PlayerCharacter" type="CharacterBody3D" parent="."]
+script = ExtResource("1_c4s55")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlayerCharacter"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
+shape = SubResource("CapsuleShape3D_player")
+
+[node name="LowPolyDude" parent="PlayerCharacter" instance=ExtResource("2_5ralf")]
+transform = Transform3D(-0.25, 0, -2.1855694e-08, 0, 0.25, 0, 2.1855694e-08, 0, -0.25, 0, 0, 0)
+
+[node name="CameraPivot" type="Node3D" parent="PlayerCharacter"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2274575, 0)
+
+[node name="Camera3D" type="Camera3D" parent="PlayerCharacter/CameraPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3)
+current = true

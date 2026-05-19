@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3 uid="uid://o6hb6qdqnpqo"]
+
+[ext_resource type="Script" uid="uid://qye8225q0tk8" path="res://addons/godot_gpu_cloth/src/gpu_cloth_solver.gd" id="1_l80cj"]
+[ext_resource type="PackedScene" uid="uid://b2knn6gpcs57p" path="res://Demo/Assets/GreenFlag/GreenFlag.glb" id="1_y44fj"]
+
+[node name="GreenFlag" instance=ExtResource("1_y44fj")]
+
+[node name="Flag" parent="." index="0"]
+transform = Transform3D(0.35115886, 0, 0, 0, 0.35115886, 0, 0, 0, 0.35115886, 0.17934036, 0, 0)
+
+[node name="GPUClothSolver" type="Node3D" parent="." index="1"]
+script = ExtResource("1_l80cj")
+target_mesh = NodePath("../Flag")
+stiffness = 0.763
+bend_stiffness = 0.529
+max_travel_distance = 0.7
+flip_normals = true
+wind = Vector3(0, 0, 5)
+wind_turbulence = 0.264
+self_collide = true
+self_collide_thickness = 0.005
+body_collider_voxel_resolution = 32
+debug_show_particles = true
+debug_show_peer_proxy = null
+metadata/_custom_type_script = "uid://qye8225q0tk8"

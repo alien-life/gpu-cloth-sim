@@ -4,11 +4,32 @@ GPU-accelerated cloth simulation for Godot 4.5+ using Position-Based Dynamics on
 
 ## Demo
 
-![Demo](demo/UpdatedCloth.gif)
+![Demo](Demo/showcase.gif)
+
+## Tutorial
+
+[![Tutorial](https://img.youtube.com/vi/Ta_X90fqqZ4/hqdefault.jpg)](https://youtu.be/Ta_X90fqqZ4)
 
 
 ## Support
 Join the discord for support :) -- https://discord.gg/maFsFAfqnY
+
+## What's New in 3.0.0
+
+Substrate rewrite plus a full body-and-cloth collision stack. The solver now simulates on *welded particles* with GPU-side normal computation and storage-texture mesh writeback (no more per-frame CPU mesh readback), and it can stack multiple cloth solvers that collide against each other AND against a character's animated body — silhouette-accurate. The fold-through artifacts that used to break flag normals are gone, the per-frame CPU stall is gone, and animated characters with shirts AND pants on the same skeleton just work. Six pieces compose:
+
+- **GPU substrate** — particle positions, predicted positions, velocities, and normals all live in storage buffers; render meshes read positions + normals from storage textures bound to the vertex shader (`positions_tex` / `normals_tex` sampled via a `VERTEX_ID → welded_idx` lookup texture). No per-frame `ArrayMesh` writeback, no `_rd.sync()` stall — the GPU pipeline runs end-to-end, and the rendered mesh just samples the simulation's textures in the vertex stage. Compute passes compose freely without forcing readbacks: predict → constraints → collisions → update → normals → output, all in one command list.
+- **Body-derived colliders, one mesh source.** A single `body_mesh` export feeds three independent collider techniques that each opt in via their own LOD knob: **auto-fitted bone capsules** (`auto_collider_lod`, fits one capsule per qualifying bone using bone-weighted vert distributions with percentile-trimmed radii), **sphere cloud** (`body_sphere_lod`, dense per-vert sphere coverage for irregular regions where capsules can't fit), and a **decimated skinned triangle mesh collider** (`body_collider_voxel_resolution`, voxel-clusters body verts to a low-poly proxy and skins each tri's verts via single-bone dominant weight per frame). Pick one for cheap bulk coverage, or stack them — the triangle mesh is silhouette-accurate where capsules approximate. Drives `cloth_skin_offset` so cloth particles physically sit off the body, plus a `body_collider_thickness` "padding" knob that controls the contact gap and `collider_friction` for Bridson Coulomb damping at every contact (kills the velocity injection that propagates as jitter through structural constraints).
+- **Multi-cloth: peer cloth-cloth collision** — list other solvers in the `peer_cloth_solvers` array and each peer's *current* animated geometry becomes a triangle SDF collider for this solver. Peers share buffers via the main `RenderingDevice` (no copy, no per-frame readback), so a shirt-on-pants setup is just two solvers naming each other as peers. Each solver pre-builds a **decimated peer-collision proxy** (voxel-clustered welded particles, `peer_collider_voxel_resolution`) — peers bind the small proxy index buffer (typically 200-500 tris from a 6000-tri cloth) plus our full positions buffer, dropping per-frame cost by ~20× vs colliding against the full mesh. Per-frame cost = `peer_proxy_tri_count × our_particle_count`, dispatched once per substep.
+- **Self-collision** — the same peer-proxy infrastructure pointed at self. Enable `self_collide` and each particle SDF-pushes out of its own decimated proxy mesh every substep, with the shader skipping triangles where the testing particle is a vertex (else infinite-direction push). Fold-through that used to break flag normals (overlapping faces averaged to zero in the normal accumulator, producing black holes) goes away because layers physically separate by `self_collide_thickness` (default 5 mm) instead of overlapping. Lets you crank `max_travel_distance` without tunneling artifacts.
+- **Skinned-target sanitization** — once per frame, BEFORE the substep loop, a sanitizer pass pushes every particle's *skinned target* (the bone-driven position cloth attaches to) out of every active collider — body capsules, body triangle mesh, AND every peer cloth's current geometry. Kills the rest-jitter / rest-clipping cycle: without it, anchor positions sit inside the body or inside a peer cloth, every substep snaps pinned particles back into that volume, collide pushes them out, and the cycle propagates structurally as visible jitter. With it, anchor positions are always reachable from outside collider volumes; rest is genuinely at rest.
+- **Per-particle thickness** — both peer and body collide passes multiply the base thickness by per-particle `cloth_weight` (the same vertex-color value that drives attachment stiffness). Pinned particles (weight 0) contribute zero thickness so they don't fight their snapped anchor; blend-zone particles (weight 0.3-0.7) get proportionally less push; fully-free particles (weight 1) get the full base thickness. Without this, the attachment-region "tight chest" verts kept pushing themselves out of the body and away from their pin targets — the same blend channel now correctly suppresses self-push where the cloth is meant to be attached.
+
+> **Authoring model in v3.0:** vertex-color channel R = **cloth weight** (0 = anchored to skinned target, 1 = free PBD); `Marker3D` pins are **orthogonal** to weights (a particle can be pinned to a marker AND have a free cloth weight, in which case the marker overrides the skinned target). Pick a channel via `cloth_weight_channel`. Anchored verts (weight near 0) are inverse-mass 0 in the solver.
+
+> **Debug:** `debug_show_particles` (colored crosses + velocity vectors), `debug_show_colliders` (cyan capsules, yellow sphere cloud, green body triangle mesh, magenta manual colliders, all in their current animated pose), and `debug_show_peer_proxy` (orange wireframe of the cloth-cloth proxy mesh deforming with the simulation in real time) — leave the collider overlay on while tuning.
+
+> **Migration:** `flip_normals` default is now `true` — Blender/glTF round-trips overwhelmingly land here producing inward right-hand-rule normals, and four out of five existing scenes already set it true. A single existing scene that relied on `false` (`Demo/Assets/LowPolyDude/low_poly_dude.tscn`) now sets it explicitly. The old separate `body_collider_mesh` export was collapsed into `body_mesh` — set `body_collider_voxel_resolution > 0` to opt into the triangle mesh collider.
 
 ## What's New in 2.1.0
 
@@ -88,9 +109,15 @@ The fishing-line constraint matures from "single nearest pin" into a properly ge
 
 ## Features
 
-- **Full GPU pipeline** — predict, constraint solve, collision, and update phases all run as compute shaders on a local `RenderingDevice`
+- **Full GPU pipeline** — predict, constraint solve, collision, normal computation, and mesh output all run as compute shaders; no per-frame CPU mesh readback (render meshes sample positions/normals from storage textures bound to the vertex shader)
 - **Position-Based Dynamics** with graph-colored constraint solving — no race conditions, no atomics, fully parallel per constraint group
-- **Collision primitives** — sphere, capsule, and oriented bounding box (OBB)
+- **Multi-cloth interaction** — list other solvers in `peer_cloth_solvers` and they collide against each other's current animated geometry every substep via decimated proxy meshes (~20× cheaper than colliding against full mesh). Shared `RenderingDevice` buffer sharing, no per-frame copy or readback. Symmetric setup: name peers on both sides for two-way interaction
+- **Self-collision** — enable `self_collide` to push each particle out of its own decimated proxy mesh every substep. Fixes fold-through artifacts on flags/capes/skirts without limiting `max_travel_distance`
+- **Body-derived colliders** — point `body_mesh` at any skinned MeshInstance3D and opt into three independent techniques via their own LOD knobs: auto-fitted bone capsules (percentile-trimmed radii), per-vert sphere cloud for irregular regions, and a voxel-decimated triangle mesh collider that's silhouette-accurate. All three can stack
+- **Bridson Coulomb friction** at every contact — damps tangential motion at body / peer / self contacts by `μ × push_magnitude`, killing the velocity injection that propagates as jitter through structural constraints. Tunable via `collider_friction`
+- **Skinned-target sanitization** — once-per-frame pre-substep pass projects each particle's bone-driven anchor position out of all active colliders (body capsules + body triangle mesh + every peer cloth's current geometry), eliminating rest-jitter from anchors trapped inside collider volumes
+- **Per-particle thickness** — collide thickness scales by the per-particle `cloth_weight` value, so attachment-region particles (weight near 0) don't fight their snapped anchors while free particles (weight 1) get the full thickness
+- **Manual collision primitives** — sphere, capsule, and oriented bounding box (OBB) via `GPUClothCollider` nodes
 - **Inertia system** — cloth naturally trails behind parent node movement
 - **Wind** with organic turbulence via sum-of-sines at irrational frequency ratios
 - **Structural, diagonal, and bending constraints** for controllable stiffness vs. drape
@@ -100,7 +127,7 @@ The fishing-line constraint matures from "single nearest pin" into a properly ge
 - **Shape-mask cutout** — bind a `sampler2D` to `shape_mask` and the fragment shader `discard`s where the red channel falls below `shape_mask_threshold`. Lets you cut non-rectangular cloth shapes (banners, ragged hems, pennants, perforations) without changing the simulation grid. UV scale + offset uniforms let you tile or position the mask
 - **Drop-in custom material** — every uniform on the default shader is exposed in the inspector, but you can replace it entirely by assigning anything to `cloth_material`. Vertex `COLOR.r` carries voxel AO so any custom shader can consume it
 - **Per-particle voxel ambient occlusion** — cloth folds darken naturally via a per-frame voxelization compute pass, no screen-space noise
-- **Editor preview** — wireframe grid, pin connections, and collider shapes drawn in the editor viewport (`@tool`)
+- **Editor preview + runtime debug overlays** — wireframe grid, pin connections, and collider shapes drawn in the editor viewport (`@tool`). At runtime: `debug_show_particles` (colored crosses + velocity vectors), `debug_show_colliders` (per-color wireframes of every active collider in its current animated pose), `debug_show_peer_proxy` (proxy mesh deforming with the cloth in real time)
 - **Double-sided rendering** with proper back-face normal-map handling
 - **Async GPU readback** — compute submission and mesh sync are pipelined across frames to hide GPU latency
 
@@ -318,6 +345,14 @@ If `voxel_ao_enabled`, after the cloth substep loop the solver runs two more com
 Open `demo/cloth_demo.tscn` for working examples: a marker-pinned source mesh with a sphere collider, along with a procedural grid cloth pinned by `Marker3D`.
 
 The `cloth_demo_driver.gd` script (not attached by default) oscillates pins and the collider for stress testing.
+
+## Credits
+
+Built and maintained by [alien-life](https://github.com/alien-life).
+
+Significant contributions to the solver architecture by [MaxYari](https://github.com/MaxYari/). Thank you.
+
+The fishing-line anchor constraint (`v1.3.0`) was inspired by Sucker Punch's *Ghost of Tsushima* cloth pipeline.
 
 ## License
 

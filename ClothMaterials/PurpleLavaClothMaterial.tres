@@ -1,0 +1,46 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3 uid="uid://kuybxqt3y8i8"]
+
+[ext_resource type="Shader" uid="uid://cx16t7gsx5v3y" path="res://addons/godot_gpu_cloth/shaders/cloth_surface.gdshader" id="1_87gqx"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_87gqx")
+shader_parameter/gpu_driven = false
+shader_parameter/tex_width = 4096
+shader_parameter/render_tex_width = 4096
+shader_parameter/skel_to_mesh_transform = Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+shader_parameter/fabric_type = 0
+shader_parameter/fabric_scale = 38.30400177194
+shader_parameter/fabric_normal_intensity = 0.0
+shader_parameter/primary_color = Color(0.98862094, 0.4937265, 0.746546, 1)
+shader_parameter/secondary_color = Color(0.17110914, 0.5130834, 1, 1)
+shader_parameter/base_roughness = 0.5170000245575
+shader_parameter/metallic = 0.0
+shader_parameter/specular = 0.0
+shader_parameter/border_width = 0.0
+shader_parameter/border_color = Color(0.7, 0.5, 0.1, 1)
+shader_parameter/border_sharpness = 0.7
+shader_parameter/border_glow = 0.5
+shader_parameter/border_edge_mask = 4
+shader_parameter/emblem_center = Vector2(0.5, 0.45)
+shader_parameter/emblem_scale = Vector2(0.3, 0.3)
+shader_parameter/emblem_tint = Color(0.8, 0.6, 0.1, 1)
+shader_parameter/emblem_opacity = 1.0
+shader_parameter/emblem_blend_mode = 0
+shader_parameter/dirt_amount = 0.2
+shader_parameter/dirt_color = Color(0.12, 0.08, 0.05, 1)
+shader_parameter/dirt_gradient_power = 2.0
+shader_parameter/dirt_edge_width = 0.08
+shader_parameter/dirt_noise_scale = 5.0
+shader_parameter/dirt_noise_intensity = 0.4
+shader_parameter/dirt_roughness_boost = 0.15
+shader_parameter/wear_amount = 0.15
+shader_parameter/wear_noise_scale = 12.0
+shader_parameter/wear_edge_width = 0.06
+shader_parameter/lava_speed = 0.3
+shader_parameter/lava_crack_scale = 6.0
+shader_parameter/lava_noise_octaves = 3
+shader_parameter/lava_emission = 2.5
+shader_parameter/shape_mask_threshold = 0.5
+shader_parameter/shape_mask_uv_scale = Vector2(1, 1)
+shader_parameter/shape_mask_uv_offset = Vector2(0, 0)
