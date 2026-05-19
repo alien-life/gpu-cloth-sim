@@ -1,0 +1,68 @@
+[gd_scene load_steps=5 format=3 uid="uid://wibbaaruufkv"]
+
+[ext_resource type="PackedScene" uid="uid://dxi4uq7ju42uv" path="res://Demo/Assets/AnimatedHuman/AnimatedHuman.glb" id="1_ory8o"]
+[ext_resource type="Script" uid="uid://dct8ir0mauv2a" path="res://Demo/Assets/AnimatedHuman/animation_player.gd" id="2_f24w1"]
+[ext_resource type="Script" uid="uid://qye8225q0tk8" path="res://addons/godot_gpu_cloth/src/gpu_cloth_solver.gd" id="2_solver"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ory8o"]
+albedo_color = Color(0.6795289, 0.54924345, 0.38921413, 1)
+
+[node name="AnimatedHuman" instance=ExtResource("1_ory8o")]
+
+[node name="Skeleton3D" parent="Export Rig_001" index="0"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.3597064, 0, 0)
+bones/2/rotation = Quaternion(0.32828087, 4.9263683e-08, 4.647177e-08, 0.9445802)
+bones/3/rotation = Quaternion(-0.10083123, -8.246527e-08, -1.1174963e-08, 0.99490356)
+bones/5/rotation = Quaternion(-0.0082693845, 0.022346843, -0.75587076, 0.6542871)
+bones/6/rotation = Quaternion(0.003437566, 0.010308492, -0.34213385, 0.9395885)
+bones/24/rotation = Quaternion(-0.008269447, -0.022346951, 0.7558709, 0.654287)
+bones/25/rotation = Quaternion(0.0034375926, -0.010308476, 0.3421338, 0.9395884)
+bones/40/rotation = Quaternion(-0.27276045, 0.74299467, 0.4313539, -0.43300644)
+bones/45/rotation = Quaternion(0.011291497, 0.6537147, 0.75637865, -0.020520622)
+bones/46/rotation = Quaternion(0.008152942, 0.7651147, 0.64334977, -0.025181938)
+bones/48/rotation = Quaternion(-0.008152996, 0.7651147, 0.6433498, 0.025182039)
+bones/49/rotation = Quaternion(0.9571491, 0.08863276, -0.21918628, -0.16723406)
+bones/50/rotation = Quaternion(0.058828704, 0.23701186, -0.013740024, 0.9696266)
+bones/53/rotation = Quaternion(0.9571491, -0.088632725, 0.21918641, -0.16723411)
+bones/54/rotation = Quaternion(0.05882874, -0.23701179, 0.013740032, 0.96962667)
+
+[node name="Human_002" parent="Export Rig_001/Skeleton3D" index="0"]
+surface_material_override/0 = SubResource("StandardMaterial3D_ory8o")
+
+[node name="Human_low-poly_002" parent="Export Rig_001/Skeleton3D" index="1"]
+visible = false
+
+[node name="AnimationPlayer" parent="." index="1"]
+script = ExtResource("2_f24w1")
+
+[node name="ShirtSolver" type="Node3D" parent="." index="2"]
+script = ExtResource("2_solver")
+target_mesh = NodePath("../Export Rig_001/Skeleton3D/Shirt")
+skeleton = NodePath("../Export Rig_001/Skeleton3D")
+stiffness = 0.237
+damping = 0.94
+max_speed = 1.0
+max_travel_distance = 0.2
+flip_normals = true
+body_mesh = NodePath("../Export Rig_001/Skeleton3D/Human_002")
+body_collider_voxel_resolution = 16
+body_collider_thickness = 0.037
+peer_cloth_solvers = Array[NodePath]([NodePath("../PantsSolver")])
+metadata/_custom_type_script = "uid://qye8225q0tk8"
+
+[node name="PantsSolver" type="Node3D" parent="." index="3"]
+script = ExtResource("2_solver")
+target_mesh = NodePath("../Export Rig_001/Skeleton3D/Pants")
+skeleton = NodePath("../Export Rig_001/Skeleton3D")
+solver_iterations = 10
+substeps = 10
+stiffness = 0.186
+bend_stiffness = 0.243
+damping = 0.961
+max_travel_distance = 0.2
+flip_normals = true
+cloth_render_offset = 0.01
+body_mesh = NodePath("../Export Rig_001/Skeleton3D/Human_002")
+auto_collider_lod = 1
+peer_cloth_solvers = Array[NodePath]([NodePath("../ShirtSolver")])
+metadata/_custom_type_script = "uid://qye8225q0tk8"

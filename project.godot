@@ -11,8 +11,13 @@ config_version=5
 [application]
 
 config/name="GPU Cloth Sim"
-run/main_scene="res://demo/cloth_demo.tscn"
+run/main_scene="uid://des4mmn7ydplp"
 config/features=PackedStringArray("4.5")
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
 
 [dotnet]
 
@@ -21,3 +26,10 @@ project/assembly_name="GPU Cloth Sim"
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_gpu_cloth/plugin.cfg")
+
+[rendering]
+
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=3
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/screen_space_aa=1

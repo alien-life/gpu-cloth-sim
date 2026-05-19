@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3 uid="uid://ci2i6ajhfn20n"]
+
+[ext_resource type="PackedScene" uid="uid://1lc8e1bm36cc" path="res://Demo/Assets/AnimatedHuman/assets/human.glb" id="1_8pt7l"]
+
+[node name="human" instance=ExtResource("1_8pt7l")]
+
+[node name="Skeleton3D" parent="Export Rig_001" index="0"]
+bones/3/rotation = Quaternion(-0.10083119, 0, 0, 0.99490356)
+bones/5/rotation = Quaternion(-0.008269378, 0.022346905, -0.75587076, 0.6542871)
+bones/6/rotation = Quaternion(0.0034376206, 0.0103084305, -0.3421338, 0.9395884)
+bones/24/rotation = Quaternion(-0.008269378, -0.022346905, 0.75587076, 0.6542871)
+bones/25/rotation = Quaternion(0.0034376206, -0.0103084305, 0.3421338, 0.9395884)
+bones/40/rotation = Quaternion(-0.27276072, 0.7429948, 0.43135342, -0.43300647)
+bones/45/rotation = Quaternion(0.011291735, 0.6537148, 0.7563785, -0.020520465)
+bones/49/rotation = Quaternion(0.9571491, 0.08863281, -0.21918629, -0.1672342)
+bones/50/rotation = Quaternion(0.05882872, 0.23701183, -0.013740034, 0.9696266)
+bones/53/rotation = Quaternion(0.9571491, -0.08863281, 0.21918629, -0.1672342)
+bones/54/rotation = Quaternion(0.05882872, -0.23701183, 0.013740034, 0.9696266)

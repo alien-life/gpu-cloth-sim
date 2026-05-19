@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://d4lfeh8pcjiyx"]
+
+[ext_resource type="PackedScene" uid="uid://csnnc856sct0t" path="res://Demo/Assets/Cat/GoodTopoTest/WeightPaintedGoodTopo.glb" id="1_kplgv"]
+[ext_resource type="Script" uid="uid://qye8225q0tk8" path="res://addons/godot_gpu_cloth/src/gpu_cloth_solver.gd" id="2_iiawa"]
+
+[node name="CatSkirt" instance=ExtResource("1_kplgv")]
+
+[node name="GPUClothSolver" type="Node3D" parent="." index="1"]
+script = ExtResource("2_iiawa")
+target_mesh = NodePath("../Armature_001/Skeleton3D/Plane_010")
+skeleton = NodePath("../Armature_001/Skeleton3D")
+flip_normals = true
+cloth_render_offset = 0.1
+body_collider_voxel_resolution = 32
+debug_show_particles = true
+metadata/_custom_type_script = "uid://qye8225q0tk8"

@@ -1,0 +1,89 @@
+[gd_scene load_steps=14 format=3 uid="uid://des4mmn7ydplp"]
+
+[ext_resource type="PackedScene" uid="uid://buw11jtfgmi3w" path="res://Demo/Assets/LowPolyDude/low_poly_dude.tscn" id="5_4ugnp"]
+[ext_resource type="Script" uid="uid://14lxj2qkuxpd" path="res://Demo/spin.gd" id="6_2mwl1"]
+[ext_resource type="PackedScene" uid="uid://bxilxn0oceis1" path="res://Demo/Assets/GreenFlag/green_flag.tscn" id="7_7a6gk"]
+[ext_resource type="PackedScene" uid="uid://b3v7p5xqp4ble" path="res://Demo/Assets/LowPolyDude/playable_dude.tscn" id="7_bej34"]
+[ext_resource type="PackedScene" uid="uid://d4lfeh8pcjiyx" path="res://Demo/Assets/Cat/GoodTopoTest/weight_painted_good_topo.tscn" id="7_ede1e"]
+[ext_resource type="Script" uid="uid://dei73to1xbtsc" path="res://Demo/sine_wiggle.gd" id="7_wiggle"]
+[ext_resource type="PackedScene" uid="uid://wibbaaruufkv" path="res://Demo/Assets/AnimatedHuman/animated_human.tscn" id="7_xdk57"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_xy6p7"]
+
+[sub_resource type="Sky" id="Sky_u328a"]
+sky_material = SubResource("ProceduralSkyMaterial_xy6p7")
+
+[sub_resource type="Environment" id="Environment_xn27r"]
+background_mode = 2
+sky = SubResource("Sky_u328a")
+ambient_light_source = 3
+ambient_light_energy = 0.6
+tonemap_mode = 3
+ssao_enabled = true
+ssao_radius = 0.5
+ssao_intensity = 1.5
+ssao_horizon = 0.05
+glow_enabled = true
+glow_intensity = 1.0
+glow_strength = 1.1
+glow_bloom = 0.1
+glow_hdr_threshold = 1.4
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(10, 10)
+
+[sub_resource type="StandardMaterial3D" id="Mat_ground"]
+albedo_color = Color(0.25, 0.25, 0.28, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_xdk57"]
+size = Vector3(11.714111, 0.77368164, 10.955017)
+
+[node name="ClothDemo" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 3, 3)
+shadow_enabled = true
+shadow_blur = 1.5
+directional_shadow_fade_start = 0.707
+directional_shadow_max_distance = 15.5
+directional_shadow_pancake_size = 0.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_xn27r")
+
+[node name="Floor" type="StaticBody3D" parent="."]
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -2.5, 0)
+mesh = SubResource("PlaneMesh_ground")
+skeleton = NodePath("../..")
+surface_material_override/0 = SubResource("Mat_ground")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.21984863, -2.890747, -0.16903687)
+shape = SubResource("BoxShape3D_xdk57")
+
+[node name="LowPolyDudeSin" type="Node3D" parent="."]
+script = ExtResource("7_wiggle")
+
+[node name="LowPolyDude" parent="LowPolyDudeSin" instance=ExtResource("5_4ugnp")]
+transform = Transform3D(0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, -0.67855644, -2.4810863, -0.016498327)
+script = ExtResource("6_2mwl1")
+
+[node name="AnimatedHuman" parent="." instance=ExtResource("7_xdk57")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5321693, -2.49413, -0.14411807)
+
+[node name="Label3D" type="Label3D" parent="AnimatedHuman"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.24114084, 0.22995305, 0.7369719)
+text = "Complex Cloth = Work In Progress"
+
+[node name="PlayableDemo" parent="." instance=ExtResource("7_bej34")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.0011352301, -2.5039885, 3.1535487)
+
+[node name="CatSkirt" parent="." instance=ExtResource("7_ede1e")]
+transform = Transform3D(-0.23, 0, -3.4729034e-08, 0, 0.23, 0, 3.4729034e-08, 0, -0.23, -2.3695483, -2.4997096, -0.08597207)
+script = ExtResource("7_wiggle")
+frequency = 0.5
+
+[node name="GreenFlag" parent="." instance=ExtResource("7_7a6gk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5550425, -2.4863925, 0)
