@@ -1,0 +1,30 @@
+[gd_scene load_steps=6 format=3 uid="uid://d1q8vc5miso25"]
+
+[ext_resource type="PackedScene" uid="uid://dhdaf7j5wyqep" path="res://Demo/Assets/BigCape/LowPolyAesthetic-Big-Cape.glb" id="1_o2vkj"]
+[ext_resource type="Script" uid="uid://qye8225q0tk8" path="res://addons/godot_gpu_cloth/src/gpu_cloth_solver.gd" id="2_i06q6"]
+
+[sub_resource type="Gradient" id="Gradient_o2vkj"]
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_i06q6"]
+gradient = SubResource("Gradient_o2vkj")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_o2vkj"]
+normal_enabled = true
+normal_texture = SubResource("GradientTexture2D_i06q6")
+
+[node name="LowPolyAesthetic-Big-Cape" instance=ExtResource("1_o2vkj")]
+
+[node name="CapeTesting" parent="Armature/Skeleton3D" index="2"]
+surface_material_override/0 = SubResource("StandardMaterial3D_o2vkj")
+
+[node name="GPUClothSolver" type="Node3D" parent="." index="1"]
+script = ExtResource("2_i06q6")
+target_mesh = NodePath("../Armature/Skeleton3D/CapeTesting")
+skeleton = NodePath("../Armature/Skeleton3D")
+max_travel_distance = 3.0
+cloth_render_offset = 0.1
+inertia_scale = Vector3(0.5, 0.5, 0.5)
+rotational_inertia_scale = 0.436
+body_mesh = NodePath("../Armature/Skeleton3D/BaseMale_001")
+auto_collider_lod = 2
+metadata/_custom_type_script = "uid://qye8225q0tk8"

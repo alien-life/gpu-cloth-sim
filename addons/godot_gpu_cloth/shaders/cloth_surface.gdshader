@@ -356,9 +356,11 @@ void fragment() {
 	// Back-face normal flip — also flip tangent-space z so NORMAL_MAP processes
 	// the back face's tangent space correctly (otherwise the procedural normal
 	// points the wrong way and back-face lighting reads as flat / wrong).
+	// Do NOT bias DEPTH here: with cull_disabled on thin cloth, a manual depth
+	// nudge disables early-Z and produces ordering flicker under 4.6's depth-
+	// prepass / TAA path when the sheet folds or self-overlaps.
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
-		DEPTH = FRAGCOORD.z + 0.0001;
 		fnorm.z = 1.0 - fnorm.z;
 	}
 

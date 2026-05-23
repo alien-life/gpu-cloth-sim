@@ -84,8 +84,11 @@ void fragment() {
 	AO               = ao_sample[ao_channel];
 	AO_LIGHT_AFFECT  = ao_light_affect;
 
+	// Flip the shading normal on back-faces (cull_disabled). Do NOT also bias
+	// DEPTH here: writing DEPTH disables early-Z and, on near-coplanar thin
+	// cloth, the manual bias causes depth-ordering flicker under Godot 4.6's
+	// depth-prepass / TAA path when the sheet folds or self-overlaps.
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
-		DEPTH  = FRAGCOORD.z + 0.0001;
 	}
 }

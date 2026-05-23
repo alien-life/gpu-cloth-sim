@@ -5,6 +5,11 @@
 [resource]
 render_priority = 1
 shader = ExtResource("1_uv5wd")
+shader_parameter/gpu_driven = false
+shader_parameter/tex_width = 4096
+shader_parameter/render_tex_width = 4096
+shader_parameter/skel_to_mesh_transform = Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+shader_parameter/render_offset = 0.0
 shader_parameter/fabric_type = 0
 shader_parameter/fabric_scale = 38.30400177194
 shader_parameter/fabric_normal_intensity = 0.0
@@ -34,11 +39,9 @@ shader_parameter/wear_amount = 0.15
 shader_parameter/wear_noise_scale = 12.0
 shader_parameter/wear_edge_width = 0.06
 shader_parameter/lava_speed = 0.3
-shader_parameter/lava_crack_scale = 6.0
-shader_parameter/lava_noise_octaves = 3
+shader_parameter/lava_crack_scale = 9.7070004135825
+shader_parameter/lava_noise_octaves = 5
 shader_parameter/lava_emission = 2.5
 shader_parameter/shape_mask_threshold = 0.5
 shader_parameter/shape_mask_uv_scale = Vector2(1, 1)
 shader_parameter/shape_mask_uv_offset = Vector2(0, 0)
-shader_parameter/ao_strength = 1.0
-shader_parameter/ao_roughness_boost = 0.15
